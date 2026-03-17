@@ -1,0 +1,165 @@
+[project]
+name = "vox"
+version = "0.1.0"
+description = "Voice input layer: captures spoken intent, transcribes locally, injects into active workflow or agent pipeline."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "faster-whisper>=1.0.0,<2",
+    "numpy>=1.26.0",
+    "pydantic>=2.0.0",
+    "sounddevice>=0.4.6",
+    "rich>=13.0.0",
+    "typer>=0.12.0",
+]
+
+[project.scripts]
+vox = "vox.cli:main"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.19.1",
+    "pytest>=9.0.2",
+    "pytest-cov>=7.0.0",
+    "ruff>=0.8.0",
+    "xenon>=0.9.3",
+    "vulture>=2.11",
+    "darglint>=1.8",
+    "bandit[toml]>=1.7",
+    "pip-audit>=2.6",
+    "pylint>=3.0",
+    "radon>=6.0",
+    "commitizen>=3.0",
+    "docstr-coverage>=2.3",
+    "pre-commit>=4.0",
+    "pytest-xdist>=3.8.0",
+    "pytest-drill-sergeant>=0.4.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatchling.build]
+packages = ["src/vox"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = ["-p", "drill_sergeant"]
+markers = [
+    "unit: Unit tests that test individual components in isolation",
+    "integration: Integration tests that test multiple components together",
+    "e2e: End-to-end tests that exercise full user journeys",
+    "slow: Tests that take a long time to run",
+]
+
+[tool.drill_sergeant]
+enabled = true
+
+# Marker rule (strict)
+enforce_markers = true
+marker_severity = "error"
+auto_detect_markers = true
+write_markers = true
+
+# AAA rule (strictest)
+enforce_aaa = true
+aaa_severity = "error"
+aaa_mode = "strict"
+aaa_synonyms_enabled = true
+aaa_builtin_synonyms = true
+min_description_length = 10
+
+# File-length rule (strict)
+enforce_file_length = true
+file_length_mode = "error"
+file_length_inline_ignore = true
+file_length_inline_ignore_token = "drill-sergeant: file-length ignore"
+max_file_length = 350
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "F",      # pyflakes
+    "I",      # isort
+    "N",      # pep8-naming
+    "B",      # flake8-bugbear
+    "Q",      # flake8-quotes
+    "SIM",    # flake8-simplify
+    "C90",    # mccabe complexity
+    "ARG",    # flake8-unused-arguments
+    "TID",    # flake8-tidy-imports
+    "UP",     # pyupgrade
+    "PL",     # pylint
+    "PERF",   # perflint
+    "D",      # pydocstyle
+    "ANN",    # flake8-annotations
+    "RUF",    # ruff-specific
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["PLR2004"]
+
+[tool.mypy]
+python_version = "3.12"
+mypy_path = "src"
+warn_return_any = true
+warn_unused_configs = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+packages = ["vox"]
+
+[tool.coverage.run]
+source = ["src/vox"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == '__main__':",
+    "if TYPE_CHECKING:",
+]
+
+[tool.coverage.html]
+directory = "htmlcov"
+
+[tool.xenon]
+max-absolute = "B"
+max-modules = "A"
+max-average = "A"
+
+[tool.vulture]
+paths = ["src", "tests"]
+exclude = [".venv", "htmlcov", "**/__pycache__"]
+min_confidence = 80
+ignore_names = ["*Protocol*", "Protocol"]
+
+[tool.bandit]
+exclude_dirs = [".venv", "htmlcov", "__pycache__"]
+skips = ["B101"]
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+version_provider = "pep621"
+update_changelog_on_bump = true
