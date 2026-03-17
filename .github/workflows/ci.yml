@@ -34,9 +34,9 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v3
 
-      - name: Install PortAudio (Ubuntu; required by sounddevice)
+      - name: Install Ubuntu system deps (PortAudio, xvfb for headless pynput)
         if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update && sudo apt-get install -y libportaudio2
+        run: sudo apt-get update && sudo apt-get install -y libportaudio2 xvfb
 
       - name: Install dependencies
         run: uv sync --frozen --all-groups
@@ -44,5 +44,10 @@ jobs:
       - name: Quality check (same as just quality-check)
         run: just quality-check
 
-      - name: Tests with coverage (same as just test-cov, fail_under from pyproject)
+      - name: Tests with coverage (Ubuntu; xvfb for headless pynput)
+        if: matrix.os == 'ubuntu-latest'
+        run: xvfb-run just test-cov
+
+      - name: Tests with coverage (macOS, Windows)
+        if: matrix.os != 'ubuntu-latest'
         run: just test-cov
