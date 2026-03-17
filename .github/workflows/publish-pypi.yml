@@ -1,13 +1,17 @@
 # Publish to PyPI when a GitHub release is published (e.g. by release-please).
-# Uses PyPI Trusted Publishers (OIDC): no long-lived API token; GitHub Actions
-# requests a short-lived token from PyPI. Configure the trusted publisher on PyPI
-# for this repo and workflow filename. See:
-# https://docs.pypi.org/trusted-publishers/adding-a-publisher/
+# Also runs after release-please succeeds: releases created by a workflow using
+# GITHUB_TOKEN do not trigger release:published (GitHub prevents recursive runs),
+# so we trigger on workflow_run as well.
+# Uses PyPI Trusted Publishers (OIDC). Configure on PyPI for this repo and workflow filename.
 name: Publish to PyPI
 
 on:
   release:
     types: [published]
+  workflow_run:
+    workflows: [release-please]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: read
@@ -17,13 +21,22 @@ jobs:
   pypi:
     name: Publish to PyPI
     runs-on: ubuntu-latest
-    # Optional: use a GitHub environment (e.g. "pypi") to require approval or rules
-    # environment: pypi
+    # Only run on release event, or when release-please workflow succeeded (it just created a release)
+    if: github.event_name == 'release' || github.event.workflow_run.conclusion == 'success'
     steps:
+      - name: Get release tag
+        id: tag
+        run: |
+          if [ -n "${{ github.event.release.tag_name }}" ]; then
+            echo "tag=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=$(gh release list --limit 1 -q .tagName)" >> $GITHUB_OUTPUT
+          fi
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ steps.tag.outputs.tag }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4

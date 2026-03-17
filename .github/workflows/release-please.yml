@@ -1,10 +1,12 @@
-# Release-please: conventional commits → release PR → merge creates GitHub release (tag).
+# Release-please: conventional commits → release PR; merge that PR triggers run again → release + PyPI + assets.
+# Trigger: manual (Run workflow) to create/update Release PR; push to main (e.g. merge Release PR) runs again and creates release.
 # See https://github.com/googleapis/release-please
 name: release-please
 
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -13,6 +15,8 @@ permissions:
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     steps:
       - uses: googleapis/release-please-action@v4
         with:

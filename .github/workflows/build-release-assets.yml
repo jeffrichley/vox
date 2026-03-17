@@ -1,17 +1,37 @@
 # Build PyInstaller onedir per OS; smoke-test; upload archives to the GitHub Release.
-# Separate from publish-pypi.yml. PyPI = Python package; GitHub Releases = binaries.
+# Also runs after release-please succeeds (releases created by GITHUB_TOKEN don't trigger release:published).
 name: Build release assets
 
 on:
   release:
     types: [published]
+  workflow_run:
+    workflows: [release-please]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: write
 
 jobs:
+  get-tag:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release' || github.event.workflow_run.conclusion == 'success'
+    steps:
+      - name: Get release tag
+        id: tag
+        run: |
+          if [ -n "${{ github.event.release.tag_name }}" ]; then
+            echo "tag=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=$(gh release list --limit 1 -q .tagName)" >> $GITHUB_OUTPUT
+          fi
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+
   build:
     name: Build ${{ matrix.platform }}
+    needs: get-tag
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -19,22 +39,23 @@ jobs:
         include:
           - platform: windows
             runner: windows-latest
-            artifact_name: vox-${{ github.event.release.tag_name }}-windows-amd64.zip
+            suffix: windows-amd64.zip
           - platform: macos
             runner: macos-latest
-            artifact_name: vox-${{ github.event.release.tag_name }}-macos-arm64.zip
+            suffix: macos-arm64.zip
           - platform: linux
             runner: ubuntu-latest
-            artifact_name: vox-${{ github.event.release.tag_name }}-linux-x86_64.tar.gz
+            suffix: linux-x86_64.tar.gz
 
     env:
-      ARTIFACT_NAME: ${{ matrix.artifact_name }}
+      RELEASE_TAG: ${{ needs.get-tag.outputs.tag }}
+      ARTIFACT_NAME: vox-${{ needs.get-tag.outputs.tag }}-${{ matrix.suffix }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ needs.get-tag.outputs.tag }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
