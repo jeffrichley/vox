@@ -130,9 +130,12 @@ class TestRunCommand:
 
     def test_run_exits_when_run_stop_window_returns_config_error(self) -> None:
         """When run_stop_window returns a ConfigError, run prints and exits 1."""
-        # Arrange - run_stop_window returns ConfigError
+        # Arrange - use stop-window path (not tray) and run_stop_window returns ConfigError
         cause = ConfigError("missing hotkey")
-        with mock.patch("vox.cli.run_stop_window", return_value=cause):
+        with (
+            mock.patch("vox.cli.get_config", return_value={"use_tray": False}),
+            mock.patch("vox.cli.run_stop_window", return_value=cause),
+        ):
             # Act - call run (will raise Exit)
             # Assert - Exit(1) raised
             with pytest.raises(typer.Exit) as exc_info:
@@ -141,9 +144,12 @@ class TestRunCommand:
 
     def test_run_exits_when_run_stop_window_returns_transcription_error(self) -> None:
         """When run_stop_window returns a TranscriptionError, run prints and exits 1."""
-        # Arrange - run_stop_window returns TranscriptionError
+        # Arrange - use stop-window path and run_stop_window returns TranscriptionError
         cause = TranscriptionError("model not found")
-        with mock.patch("vox.cli.run_stop_window", return_value=cause):
+        with (
+            mock.patch("vox.cli.get_config", return_value={"use_tray": False}),
+            mock.patch("vox.cli.run_stop_window", return_value=cause),
+        ):
             # Act - call run (will raise Exit)
             # Assert - Exit(1) raised
             with pytest.raises(typer.Exit) as exc_info:
@@ -152,9 +158,12 @@ class TestRunCommand:
 
     def test_run_exits_when_run_stop_window_returns_other_error(self) -> None:
         """When run_stop_window returns another exception, run exits 1."""
-        # Arrange - run_stop_window returns RuntimeError
+        # Arrange - use stop-window path and run_stop_window returns RuntimeError
         cause = RuntimeError("other")
-        with mock.patch("vox.cli.run_stop_window", return_value=cause):
+        with (
+            mock.patch("vox.cli.get_config", return_value={"use_tray": False}),
+            mock.patch("vox.cli.run_stop_window", return_value=cause),
+        ):
             # Act - call run (will raise Exit)
             # Assert - Exit(1) raised
             with pytest.raises(typer.Exit) as exc_info:
@@ -163,9 +172,10 @@ class TestRunCommand:
 
     def test_run_prints_config_error_when_cause_is_config_error(self) -> None:
         """When run_stop_window returns ConfigError, run prints Config error and exits 1."""
-        # Arrange - run_stop_window returns ConfigError
+        # Arrange - use stop-window path and run_stop_window returns ConfigError
         cause = ConfigError("missing hotkey")
         with (
+            mock.patch("vox.cli.get_config", return_value={"use_tray": False}),
             mock.patch("vox.cli.console") as mock_console,
             mock.patch("vox.cli.run_stop_window", return_value=cause),
         ):
@@ -178,9 +188,10 @@ class TestRunCommand:
 
     def test_run_prints_model_error_when_cause_is_transcription_error(self) -> None:
         """When run_stop_window returns TranscriptionError, run prints Model error, exits 1."""
-        # Arrange - run_stop_window returns TranscriptionError
+        # Arrange - use stop-window path and run_stop_window returns TranscriptionError
         cause = TranscriptionError("model not found")
         with (
+            mock.patch("vox.cli.get_config", return_value={"use_tray": False}),
             mock.patch("vox.cli.console") as mock_console,
             mock.patch("vox.cli.run_stop_window", return_value=cause),
         ):
@@ -193,9 +204,10 @@ class TestRunCommand:
 
     def test_run_prints_generic_error_when_cause_is_other(self) -> None:
         """When run_stop_window returns other exception, run prints Error and exits 1."""
-        # Arrange - run_stop_window returns RuntimeError
+        # Arrange - use stop-window path and run_stop_window returns RuntimeError
         cause = RuntimeError("other")
         with (
+            mock.patch("vox.cli.get_config", return_value={"use_tray": False}),
             mock.patch("vox.cli.console") as mock_console,
             mock.patch("vox.cli.run_stop_window", return_value=cause),
         ):

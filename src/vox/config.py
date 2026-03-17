@@ -174,6 +174,18 @@ def _apply_device_id_env(raw: dict[str, Any]) -> None:
         raw["device_id"] = os.environ["VOX_DEVICE_ID"]
 
 
+def _apply_use_tray_env(raw: dict[str, Any]) -> None:
+    """Set raw['use_tray'] from VOX_TRAY if set (1, true, yes -> True).
+
+    Args:
+        raw: Config dict to update in place.
+    """
+    if "VOX_TRAY" not in os.environ:
+        return
+    v = os.environ["VOX_TRAY"].strip().lower()
+    raw["use_tray"] = v in ("1", "true", "yes")
+
+
 def _apply_env_overrides(raw: dict[str, Any]) -> None:
     """Mutate raw with env overrides (VOX_*).
 
@@ -184,6 +196,7 @@ def _apply_env_overrides(raw: dict[str, Any]) -> None:
         if env_key in os.environ:
             raw[key] = os.environ[env_key].strip() if strip else os.environ[env_key]
     _apply_device_id_env(raw)
+    _apply_use_tray_env(raw)
 
 
 _CONFIG_KEYS = (
@@ -193,6 +206,7 @@ _CONFIG_KEYS = (
     "compute_type",
     "compute_device",
     "injection_mode",
+    "use_tray",
 )
 
 
@@ -280,12 +294,38 @@ def _validate_device_id(raw: dict[str, Any]) -> None:
         raise ValueError("device_id: must be an integer (e.g. from `vox devices`)")
 
 
+def _validate_use_tray(raw: dict[str, Any]) -> None:
+    """Raise if use_tray is present and not a bool or bool-like string.
+
+    Args:
+        raw: Config dict to validate.
+
+    Raises:
+        ValueError: If use_tray is present and not bool or "true"/"false"/"1"/"0".
+    """
+    if "use_tray" not in raw or raw["use_tray"] is None:
+        return
+    v = raw["use_tray"]
+    if isinstance(v, bool):
+        return
+    if isinstance(v, str) and v.strip().lower() in (
+        "true",
+        "false",
+        "1",
+        "0",
+        "yes",
+        "no",
+    ):
+        return
+    raise ValueError("use_tray: must be true or false")
+
+
 def validate_config(raw: dict[str, Any]) -> None:
     """Validate required and optional fields; raise ValueError with field name.
 
     Required: hotkey (non-empty string).
-    Optional: device_id (int or None), model_size, compute_type, compute_device,
-    injection_mode.
+    Optional: device_id (int or None), use_tray (bool), model_size, compute_type,
+    compute_device, injection_mode.
     No silent fallbacks for required fields.
 
     Args:
@@ -297,6 +337,7 @@ def validate_config(raw: dict[str, Any]) -> None:
     try:
         _validate_hotkey(raw)
         _validate_device_id(raw)
+        _validate_use_tray(raw)
         _validate_optional_str(raw, "model_size")
         _validate_optional_str(raw, "compute_type")
         _validate_optional_str(raw, "compute_device")
@@ -348,6 +389,27 @@ def get_transcription_options() -> TranscriptionOptions:
         raise ConfigError(str(e)) from e
 
 
+def _bool_default(raw: dict[str, Any], key: str, default: bool) -> bool:
+    """Get key from raw as bool or return default.
+
+    Args:
+        raw: Config dict.
+        key: Key to look up.
+        default: Value if key missing or None.
+
+    Returns:
+        Boolean value; accepts bool or string "true"/"1"/"yes" (case-insensitive).
+    """
+    v = raw.get(key)
+    if v is None:
+        return default
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, str):
+        return v.strip().lower() in ("true", "1", "yes")
+    return default
+
+
 def _str_default(raw: dict[str, Any], key: str, default: str) -> str:
     """Get key from raw or return default; strip if string.
 
@@ -387,5 +449,6 @@ def get_config() -> dict[str, Any]:
         "compute_type": _str_default(raw, "compute_type", "float32"),
         "compute_device": _str_default(raw, "compute_device", "cpu"),
         "injection_mode": _str_default(raw, "injection_mode", "clipboard"),
+        "use_tray": _bool_default(raw, "use_tray", False),
     }
     return out

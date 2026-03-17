@@ -138,8 +138,12 @@ class _PushToTalkSession:
             Queue()
         )
 
-    def _run_record(self) -> None:
-        """Record until stop_event is set; store buffer in result_holder."""
+    def _run_record(self, holder: list[np.ndarray | None]) -> None:
+        """Record until stop_event is set; store buffer in holder[0].
+
+        Args:
+            holder: Single-element list to receive the recorded buffer.
+        """
         if self.stop_event is None:
             return
         buf = record_until_stop(
@@ -148,7 +152,8 @@ class _PushToTalkSession:
             sample_rate=self.sample_rate,
             channels=self.channels,
         )
-        self.result_holder[0] = buf
+        if holder:
+            holder[0] = buf
 
     def _processor_loop(self) -> None:
         """Consume queue: join record thread, then call on_audio with buffer."""
@@ -180,8 +185,11 @@ class _PushToTalkSession:
                 and self.recording_thread is None
             ):
                 self.stop_event = threading.Event()
-                self.result_holder = [None]
-                self.recording_thread = threading.Thread(target=self._run_record)
+                holder: list[np.ndarray | None] = [None]
+                self.result_holder = holder
+                self.recording_thread = threading.Thread(
+                    target=self._run_record, args=(holder,)
+                )
                 self.recording_thread.start()
 
     def _on_release(self, key: keyboard.Key | keyboard.KeyCode | None) -> None:
