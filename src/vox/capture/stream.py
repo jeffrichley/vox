@@ -116,7 +116,10 @@ def record_until_stop(
         """Append incoming audio block to list.
 
         Args:
-            indata: Chunk of audio from the stream.
+            indata: Incoming audio block from sounddevice.
+            _frames: Unused frame count.
+            _time: Unused timestamp.
+            _status: Unused status.
         """
         blocks.append(indata.copy())
 

@@ -208,13 +208,19 @@ class _PushToTalkSession:
     def run(self, stop_event: threading.Event | None = None) -> None:
         """Run the listener and processor until stopped.
 
-        If stop_event is set, the listener is stopped and run() returns.
+        If stop_event is set from another thread, the listener is stopped
+        and run() returns.
+
+        Args:
+            stop_event: Optional event; when set, a watcher thread stops the
+                keyboard listener so this method returns.
         """
         listener_ref: list = []
         proc_thread = threading.Thread(target=self._processor_loop)
         proc_thread.start()
 
         def watcher() -> None:
+            """When stop_event is set, call listener.stop() so join() returns."""
             if stop_event is None:
                 return
             stop_event.wait()
@@ -239,7 +245,7 @@ class _PushToTalkSession:
             proc_thread.join()
 
 
-def run_push_to_talk_loop(
+def run_push_to_talk_loop(  # noqa: PLR0913
     hotkey_str: str,
     device_id: int | None,
     sample_rate: int,

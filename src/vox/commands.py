@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+
 import numpy as np
 from rich.console import Console
 from rich.panel import Panel
@@ -109,7 +110,7 @@ def handle_run(
         """Transcribe buffer, set clipboard, optionally paste into focused window.
 
         Args:
-            audio_buffer: Recorded float32 mono array (16 kHz).
+            audio_buffer: Recorded float32 mono audio (e.g. from record_until_stop).
         """
         try:
             text = transcribe(audio_buffer, model=model)

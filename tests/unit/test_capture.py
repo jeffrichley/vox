@@ -1,12 +1,15 @@
-"""Unit tests for capture: list_devices and record/playback."""
+"""Unit tests for capture: list_devices, record/playback, record_until_stop."""
 
 from __future__ import annotations
+
+import threading
+from unittest import mock
 
 import numpy as np
 import pytest
 import sounddevice as sd
 
-from vox.capture import list_devices, play_back, record_seconds
+from vox.capture import list_devices, play_back, record_seconds, record_until_stop
 
 
 @pytest.mark.unit
@@ -40,6 +43,75 @@ class TestListDevices:
         for dev_id, _name, _host_api in result:
             dev = sd.query_devices(dev_id)
             assert dev.get("max_input_channels", 0) > 0
+
+    def test_list_devices_raises_runtime_error_on_port_audio_error(self) -> None:
+        """When sounddevice raises PortAudioError, list_devices raises RuntimeError."""
+        # Arrange - query_devices raises PortAudioError
+        with (
+            mock.patch(
+                "vox.capture.stream.sd.query_devices",
+                side_effect=sd.PortAudioError(),
+            ),
+            pytest.raises(RuntimeError, match=r"audio|device|permission"),
+        ):
+            # Act - call list_devices (expects RuntimeError)
+            # Assert - RuntimeError with message about devices/permissions
+            list_devices()
+
+
+@pytest.mark.unit
+class TestRecordUntilStop:
+    """record_until_stop waits for stop_event then returns concatenated blocks."""
+
+    def test_record_until_stop_returns_empty_array_when_stop_immediate(self) -> None:
+        """When stop_event already set, recording returns empty array (no callback)."""
+        # Arrange - stop_event set immediately; mock InputStream so callback never runs
+        stop_ev = threading.Event()
+        stop_ev.set()
+        mock_stream = mock.Mock()
+
+        with mock.patch("vox.capture.stream.sd.InputStream", return_value=mock_stream):
+            # Act - call record_until_stop with pre-set stop event
+            result = record_until_stop(stop_ev, sample_rate=16000, channels=1)
+            # Assert - stream started, then wait; no blocks so empty array
+            mock_stream.start.assert_called_once()
+            assert result.shape == (0, 1)
+            assert result.dtype == np.float32
+
+    def test_record_until_stop_returns_concatenated_blocks_when_callback_invoked(
+        self,
+    ) -> None:
+        """When callback invoked with blocks, record_until_stop returns concatenated array."""
+        # Arrange - capture callback and invoke it with one block; then set stop_event
+        stop_ev = threading.Event()
+        callback_holder: list = []
+        block = np.array([[0.1], [0.2]], dtype=np.float32)
+
+        def capture_stream(*_args: object, **kwargs: object) -> mock.Mock:
+            callback_holder.append(kwargs.get("callback"))
+            stream = mock.Mock()
+            stream.start = mock.Mock()
+            stream.stop = mock.Mock()
+            stream.close = mock.Mock()
+
+            def start_side_effect() -> None:
+                cb = callback_holder[0]
+                if cb:
+                    cb(block, 2, None, None)
+                stop_ev.set()
+
+            stream.start.side_effect = start_side_effect
+            return stream
+
+        with mock.patch(
+            "vox.capture.stream.sd.InputStream", side_effect=capture_stream
+        ):
+            # Act - call record_until_stop; callback will run once then stop_event set
+            result = record_until_stop(stop_ev, sample_rate=16000, channels=1)
+            # Assert - one block (2 frames, 1 channel)
+            assert result.shape == (2, 1)
+            assert result.dtype == np.float32
+            np.testing.assert_array_almost_equal(result[:, 0], [0.1, 0.2])
 
 
 @pytest.mark.unit

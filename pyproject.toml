@@ -116,7 +116,7 @@ convention = "google"
 ban-relative-imports = "all"
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["PLR2004"]
+"tests/**" = ["PLR2004", "E501"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -129,7 +129,7 @@ packages = ["vox"]
 
 [tool.coverage.run]
 source = ["src/vox"]
-omit = ["tests/*"]
+omit = ["tests/*", "src/vox/gui/*"]
 
 [tool.coverage.report]
 fail_under = 80

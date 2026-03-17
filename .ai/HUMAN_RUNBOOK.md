@@ -16,8 +16,8 @@ Use these commands in this order from idea to merged/usable work.
 5. For each implementation phase: `.ai/COMMANDS/phase-intent-check.md <plan> "<phase-heading>"` (example: `.ai/COMMANDS/phase-intent-check.md .ai/PLANS/006-status-sync-system.md "Phase 2: Expand status report plan coverage and operator command targets"`)
 6. `.ai/COMMANDS/execute.md <plan>` (executes `## Branch Setup` first)
 7. `.ai/COMMANDS/status-sync.md <plan>` (after each completed phase)
-8. `.ai/COMMANDS/validate.md`
-9. `.ai/COMMANDS/review.md`
+8. `.ai/COMMANDS/validate.md <plan>`
+9. `.ai/COMMANDS/review.md <plan>`
 
 ### C) Record and publish
 10. `.ai/COMMANDS/commit.md`
