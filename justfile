@@ -91,6 +91,9 @@ quality: format lint types complexity vulture darglint audit bandit radon find-d
 # Check-only quality lane (CI-safe; no write)
 quality-check: format-check lint-check types complexity vulture darglint audit bandit radon find-dupes docstr-coverage docs-check
 
+# Final gate: quality checks + tests with coverage (run before commit; matches CI)
+test-quality: quality-check test-cov
+
 # Lighter target for day-to-day development
 quality-dev: format lint types darglint
 
