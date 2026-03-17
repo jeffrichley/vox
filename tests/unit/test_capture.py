@@ -75,7 +75,21 @@ class TestRecordSeconds:
 
 @pytest.mark.unit
 class TestPlayBack:
-    """play_back() does not raise for valid input."""
+    """play_back() does not raise for valid input.
+
+    These tests intentionally assert the *absence of an exception*.
+
+    Rationale:
+    - `play_back()` is a side-effecting function (it hands audio to the OS / device).
+      In unit tests, we can't reliably assert "audio was audible" or "device played"
+      across environments.
+    - The contract we *can* enforce here is: for valid, well-formed sample arrays,
+      the function should accept the input and return without error.
+
+    What this does NOT validate:
+    - actual audio output, timing, device selection, or host API behavior.
+      Those belong in integration/e2e testing (or manual verification).
+    """
 
     def test_play_back_accepts_mono_array(self) -> None:
         """play_back(samples) with (n,) or (n,1) does not raise."""
@@ -85,7 +99,7 @@ class TestPlayBack:
         # Act - play back
         play_back(mono, sample_rate=16000)
 
-        # Assert - no exception
+        # Assert - no exception (implicit in pytest: exceptions fail the test)
 
     def test_play_back_accepts_stereo_shape(self) -> None:
         """play_back with (n, 1) works."""
@@ -95,4 +109,4 @@ class TestPlayBack:
         # Act - play back
         play_back(mono, sample_rate=16000)
 
-        # Assert - no exception
+        # Assert - no exception (implicit in pytest: exceptions fail the test)
