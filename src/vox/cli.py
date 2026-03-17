@@ -6,8 +6,8 @@ import typer
 from rich.console import Console
 
 from vox.commands import handle_devices, handle_test_mic
-from vox.config import ConfigError
-from vox.gui import run_stop_window
+from vox.config import ConfigError, get_config
+from vox.gui import run_stop_window, run_tray
 from vox.transcribe import TranscriptionError
 
 
@@ -25,6 +25,49 @@ app = typer.Typer(
     help="Vox: voice input layer — capture, transcribe, inject.",
 )
 console = Console()
+
+
+def _run_impl() -> None:
+    """Run push-to-talk (tray or stop window + worker).
+
+    Uses tray if config or VOX_TRAY has use_tray enabled; otherwise the Tk stop
+    window. Same error handling for both.
+
+    Raises:
+        Exit: Code 1 if config is invalid or the worker failed (e.g. model error).
+    """
+    try:
+        cfg = get_config()
+    except ConfigError as e:
+        console.print(f"[red]Config error:[/red] {e}")
+        raise typer.Exit(1) from e
+    use_tray = cfg.get("use_tray", False)
+    runner = run_tray if use_tray else run_stop_window
+    try:
+        err = runner(console)
+        if err is not None:
+            raise RunWindowError() from err
+    except RunWindowError as e:
+        cause = e.__cause__
+        if isinstance(cause, ConfigError):
+            console.print(f"[red]Config error:[/red] {cause}")
+        elif isinstance(cause, TranscriptionError):
+            console.print(f"[red]Model error:[/red] {cause}")
+        elif cause is not None:
+            console.print(f"[red]Error:[/red] {cause}")
+        raise typer.Exit(1) from e
+
+
+@app.callback(invoke_without_command=True)
+def _default_callback(ctx: typer.Context) -> None:
+    """When no subcommand is given, run push-to-talk (same as `vox run`).
+
+    Args:
+        ctx: Typer context; used to detect if a subcommand was invoked.
+    """
+    if ctx.invoked_subcommand is not None:
+        return
+    _run_impl()
 
 
 @app.command()
@@ -76,24 +119,10 @@ def run() -> None:
     Loads config from ~/.vox/vox.toml (or VOX_CONFIG). On each hotkey release,
     recorded audio is transcribed and placed on the clipboard (and optionally
     pasted into the focused window if injection_mode is clipboard_and_paste).
-    A small window with a Stop button is shown to exit.
-
-    Raises:
-        Exit: Code 1 if the worker failed (e.g. config or model error).
+    A small window with a Stop button is shown to exit. Exits with code 1 if
+    the worker failed (e.g. config or model error).
     """
-    try:
-        err = run_stop_window(console)
-        if err is not None:
-            raise RunWindowError() from err
-    except RunWindowError as e:
-        cause = e.__cause__
-        if isinstance(cause, ConfigError):
-            console.print(f"[red]Config error:[/red] {cause}")
-        elif isinstance(cause, TranscriptionError):
-            console.print(f"[red]Model error:[/red] {cause}")
-        elif cause is not None:
-            console.print(f"[red]Error:[/red] {cause}")
-        raise typer.Exit(1) from e
+    _run_impl()
 
 
 def main() -> None:

@@ -1,0 +1,41 @@
+# Publish to PyPI when a GitHub release is published (e.g. by release-please).
+# Uses PyPI Trusted Publishers (OIDC): no long-lived API token; GitHub Actions
+# requests a short-lived token from PyPI. Configure the trusted publisher on PyPI
+# for this repo and workflow filename. See:
+# https://docs.pypi.org/trusted-publishers/adding-a-publisher/
+name: Publish to PyPI
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  pypi:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    # Optional: use a GitHub environment (e.g. "pypi") to require approval or rules
+    # environment: pypi
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Build
+        run: uv build --no-sources
+
+      - name: Publish to PyPI
+        run: uv publish
+        # Trusted publishing: with id-token: write and no UV_PUBLISH_TOKEN,
+        # uv obtains a short-lived token from PyPI via OIDC. If the index
+        # rejects attestations, add: env: UV_PUBLISH_NO_ATTESTATIONS: 1

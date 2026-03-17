@@ -1,0 +1,81 @@
+# Build PyInstaller onedir per OS; smoke-test; upload archives to the GitHub Release.
+# Separate from publish-pypi.yml. PyPI = Python package; GitHub Releases = binaries.
+name: Build release assets
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows
+            runner: windows-latest
+            artifact_name: vox-${{ github.event.release.tag_name }}-windows-amd64.zip
+          - platform: macos
+            runner: macos-latest
+            artifact_name: vox-${{ github.event.release.tag_name }}-macos-arm64.zip
+          - platform: linux
+            runner: ubuntu-latest
+            artifact_name: vox-${{ github.event.release.tag_name }}-linux-x86_64.tar.gz
+
+    env:
+      ARTIFACT_NAME: ${{ matrix.artifact_name }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: uv sync --frozen --all-groups
+
+      - name: Install PyInstaller
+        run: uv pip install pyinstaller
+
+      - name: Build (PyInstaller onedir)
+        run: uv run pyinstaller --onedir --name vox --collect-all vox vox
+
+      - name: Smoke test (Windows)
+        if: matrix.platform == 'windows'
+        run: .\dist\vox\vox.exe --help
+
+      - name: Smoke test (macOS / Linux)
+        if: matrix.platform != 'windows'
+        run: ./dist/vox/vox --help
+
+      - name: Create archive (Windows)
+        if: matrix.platform == 'windows'
+        run: Compress-Archive -Path dist\vox -DestinationPath $env:ARTIFACT_NAME
+
+      - name: Create archive (macOS)
+        if: matrix.platform == 'macos'
+        run: cd dist && zip -r "../$ARTIFACT_NAME" vox && cd ..
+
+      - name: Create archive (Linux)
+        if: matrix.platform == 'linux'
+        run: tar -C dist -czvf "$ARTIFACT_NAME" vox
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ARTIFACT_NAME }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

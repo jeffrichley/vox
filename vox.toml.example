@@ -19,6 +19,10 @@ compute_type = "float32"
 # Use cuda with compute_type float16 or int8 when GPU and CUDA 12 / cuDNN 9 are available.
 compute_device = "cpu"
 
+# Optional: use system tray instead of the Stop window. Default: false.
+# When true, Vox shows a tray icon; choose Quit from the menu to stop. Env: VOX_TRAY=1.
+# use_tray = false
+
 # Optional: how to inject transcribed text.
 # - "clipboard": only set clipboard (default).
 # - "clipboard_and_paste": set clipboard and paste into focused window (needs accessibility permission).
