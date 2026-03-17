@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0.0",
+  "exported_at": "2026-03-17T13:49:14.873Z",
+  "source_url": "https://chatgpt.com/c/69b95b7b-70c0-832a-86d3-6acfcb412138",
+  "title": "Branch · Push-to-talk transcription in Python",
+  "chat_id": "69b95b7b-70c0-832a-86d3-6acfcb412138",
+  "message_count": 2,
+  "messages": [
+    {
+      "chat_id": "69b95b7b-70c0-832a-86d3-6acfcb412138",
+      "msg_id": "f1fdf4be-018c-4d07-a796-49ad30bc84d8",
+      "created_at": null,
+      "role": "user",
+      "content": "what should we call this",
+      "content_type": "text/markdown",
+      "attachments": []
+    },
+    {
+      "chat_id": "69b95b7b-70c0-832a-86d3-6acfcb412138",
+      "msg_id": "e2474779-6e76-4967-9fca-ca721d89ad79",
+      "created_at": null,
+      "role": "assistant",
+      "content": "Oh I like where this is going… this is exactly the kind of small, sharp tool that ends up becoming part of your daily workflow.\n\nLet’s name it like something you’d actually keep and grow, not just a throwaway script.\n\n🧠 First — what this thing is\n\nAt its core, this is:\n\npush-to-talk\n\nlocal AI transcription\n\nsystem-level text injection\n\nalways-available assistant interface\n\nThis is not just Whisper — it’s the input layer to your entire agent system.\n\nSo the name should reflect:\n\nspeed / immediacy\n\nvoice → action\n\nsystem integration\n\n🔥 Top-tier name directions (the ones I’d actually recommend)\n1. WhisperKey\n\nSimple. Clean. Feels like a real product.\n\n“Press the key, whisper, it appears.”\n\nimmediately understandable\n\nties to Whisper without being limiting\n\nsounds like a system utility\n\n👉 This is the safest “just ship it” name\n\n2. PushTalk\n\nVery literal, very strong.\n\nno fluff\n\nfeels like a core OS feature\n\nexpandable later (voice commands, agents, etc.)\n\n👉 Great if you want something practical and productized\n\n3. Vox\n\nShort. Strong. Brandable.\n\nLatin for voice\n\nfeels like infrastructure\n\nfits your Chrona ecosystem vibe\n\n👉 This is the “this will grow into something bigger” name\n\n4. Echo\n\nClean and memorable.\n\n“you speak → system echoes as text”\n\nslightly more poetic\n\neasy to extend (Echo Agent, Echo Input, etc.)\n\n👉 Good middle ground between product + brand\n\n5. HotMic\n\nMore personality.\n\nimplies instant capture\n\nslightly edgy\n\nmemorable\n\n👉 Good for internal tool, maybe not long-term brand\n\n🌱 My actual recommendation for you\n\nGiven everything you're building (Chrona, agents, OS-like systems):\n\n👉 Vox is the right long-term play\n👉 WhisperKey is the right short-term play\n\nIf you want both:\n\nProject name: Vox\n\nFirst feature/tool: WhisperKey\n\n🧩 If you want it to fit your ecosystem\n\nYou’ve got:\n\nGROVE (context system)\n\nHQ (control center)\n\nPepper (COO)\n\nSo this fits really nicely as:\n\nVox → input layer\n\n“Voice enters the system through Vox”\n\n“Agents don’t listen — Vox listens for them”\n\n💡 My slightly sassy opinion\n\nIf you call it something like speech_to_text.py, I will absolutely judge you.\n\nThis is one of those tools you’re going to use every single day.\nName it like it matters.\n\nIf you want, I can:\n\ndefine the full role of Vox in your architecture\n\nwire it into your agent system (Pepper / OpenClaw / GROVE)\n\nor help you turn this into a background service with a tray icon and config system\n\nJust say the word.",
+      "content_type": "text/markdown",
+      "attachments": []
+    }
+  ]
+}

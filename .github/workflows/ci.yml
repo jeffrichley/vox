@@ -1,0 +1,53 @@
+# CI: same quality gates as `just quality-check` + `just test-cov`.
+# If it passes locally with those two commands, it passes in the PR.
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  quality-and-test:
+    name: "quality + test (${{ matrix.os }}, py${{ matrix.python-version }})"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.12"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      - name: Install Ubuntu system deps (PortAudio, xvfb for headless pynput)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y libportaudio2 xvfb
+
+      - name: Install dependencies
+        run: uv sync --frozen --all-groups
+
+      - name: Quality check (same as just quality-check)
+        run: just quality-check
+
+      - name: Tests with coverage (Ubuntu; xvfb for headless pynput)
+        if: matrix.os == 'ubuntu-latest'
+        run: xvfb-run just test-cov
+
+      - name: Tests with coverage (macOS, Windows)
+        if: matrix.os != 'ubuntu-latest'
+        run: just test-cov

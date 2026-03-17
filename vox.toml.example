@@ -1,0 +1,25 @@
+# Vox config example. Copy to ~/.vox/vox.toml and edit.
+# Override path with VOX_CONFIG env. Env vars VOX_HOTKEY, VOX_DEVICE_ID, etc. override these values.
+
+# Required: global hotkey to start/stop recording. Format: modifier+key (e.g. ctrl+shift+v).
+hotkey = "ctrl+shift+v"
+
+# Optional: audio input device ID from `vox devices`. Omit or leave unset for default device.
+# device_id = 0
+
+# Optional: faster-whisper model size (tiny, base, small, medium, large-v3, etc.) or path to model dir.
+# Default: base. First run downloads from Hugging Face.
+model_size = "base"
+
+# Optional: compute type for inference: float32, float16, int8, int8_float16.
+# Use int8 for lower memory on CPU. Default: float32.
+compute_type = "float32"
+
+# Optional: compute device: cpu or cuda. Default: cpu.
+# Use cuda with compute_type float16 or int8 when GPU and CUDA 12 / cuDNN 9 are available.
+compute_device = "cpu"
+
+# Optional: how to inject transcribed text.
+# - "clipboard": only set clipboard (default).
+# - "clipboard_and_paste": set clipboard and paste into focused window (needs accessibility permission).
+injection_mode = "clipboard"
