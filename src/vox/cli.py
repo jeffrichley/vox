@@ -1,14 +1,15 @@
-"""CLI entry: vox devices, vox test-mic, vox run (Phase 3)."""
+"""CLI entry: thin wrapper that delegates to vox.commands."""
 
 from __future__ import annotations
 
+import sys
+
 import typer
 from rich.console import Console
-from rich.table import Table
 
-from vox.capture import list_devices, play_back, record_seconds
-from vox.config import get_transcription_options
-from vox.transcribe import transcribe
+from vox.commands import handle_devices, handle_run, handle_test_mic
+from vox.config import ConfigError
+from vox.transcribe import TranscriptionError
 
 app = typer.Typer(
     name="vox",
@@ -27,21 +28,11 @@ def devices() -> None:
     Raises:
         Exit: Exit with code 1 if listing devices fails (typer.Exit).
     """
-    table = Table(title="Audio input devices")
-    table.add_column("ID", style="dim")
-    table.add_column("Name")
-    table.add_column("Host API", style="dim")
     try:
-        devs = list_devices()
+        handle_devices(console)
     except RuntimeError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1) from e
-    for dev_id, name, host_api in devs:
-        table.add_row(str(dev_id), name, host_api)
-    if not devs:
-        console.print("[yellow]No input devices found.[/yellow]")
-    else:
-        console.print(table)
 
 
 @app.command("test-mic")
@@ -62,30 +53,36 @@ def test_mic(
     Raises:
         Exit: Code 1 if seconds <= 0 or on capture/transcribe error (typer.Exit).
     """
-    if seconds <= 0:
-        console.print("[red]Error:[/red] --seconds must be positive.")
-        raise typer.Exit(1)
     try:
-        console.print(f"Recording for [bold]{seconds}[/bold] seconds...")
-        samples = record_seconds(seconds, device_id=device)
-        console.print("Playing back...")
-        play_back(samples)
-        opts = get_transcription_options()
-        console.print("Transcribing...")
-        text = transcribe(
-            samples,
-            model_size_or_path=opts.model_size,
-            device=opts.compute_device,
-            compute_type=opts.compute_type,
-        )
-        if text:
-            console.print("[bold]Transcription:[/bold]", text)
-        else:
-            console.print("[dim]Transcription: (no speech detected)[/dim]")
-        console.print("[green]Done.[/green]")
-    except Exception as e:
+        handle_test_mic(console, device_id=device, seconds=seconds)
+    except (ValueError, ConfigError, TranscriptionError, RuntimeError) as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1) from e
+
+
+@app.command()
+def run() -> None:
+    """Start push-to-talk: press hotkey to record, release to transcribe and inject.
+
+    Loads config from ~/.vox/vox.toml (or VOX_CONFIG). On each hotkey release,
+    recorded audio is transcribed and placed on the clipboard (and optionally
+    pasted into the focused window if injection_mode is clipboard_and_paste).
+    Press Ctrl+C to exit.
+
+    Raises:
+        Exit: Code 1 if config is invalid or model fails to load (typer.Exit).
+    """
+    try:
+        handle_run(console)
+    except ConfigError as e:
+        console.print(f"[red]Config error:[/red] {e}")
+        raise typer.Exit(1) from e
+    except TranscriptionError as e:
+        console.print(f"[red]Model error:[/red] {e}")
+        raise typer.Exit(1) from e
+    except KeyboardInterrupt:
+        console.print("\n[dim]Stopped.[/dim]")
+        sys.exit(0)
 
 
 def main() -> None:

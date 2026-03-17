@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+
 import numpy as np
 
 # sounddevice has no py.typed/stubs; ignore for type-checking only (plan Phase 1).
@@ -80,3 +82,57 @@ def play_back(samples: np.ndarray, sample_rate: int = 16000) -> None:
         samples = samples[:, np.newaxis]
     sd.play(samples, samplerate=sample_rate)
     sd.wait()
+
+
+def record_until_stop(
+    stop_event: threading.Event,
+    device_id: int | None = None,
+    sample_rate: int = 16000,
+    channels: int = 1,
+) -> np.ndarray:
+    """Record audio until stop_event is set; return float32 mono array.
+
+    Used for push-to-talk: start recording, later set the event to stop and get
+    the buffer. Call from a dedicated thread; the event is set from another
+    thread (e.g. hotkey release).
+
+    Args:
+        stop_event: When set, recording stops and the function returns.
+        device_id: Sounddevice device index; None for default input.
+        sample_rate: Sample rate in Hz (16 kHz for faster-whisper).
+        channels: Number of channels (1 = mono).
+
+    Returns:
+        numpy array (frames, channels) float32 in [-1, 1]; empty if no frames.
+    """
+    blocks: list[np.ndarray] = []
+
+    def callback(
+        indata: np.ndarray,
+        _frames: int,
+        _time: object,
+        _status: object,
+    ) -> None:
+        """Append incoming audio block to list.
+
+        Args:
+            indata: Chunk of audio from the stream.
+        """
+        blocks.append(indata.copy())
+
+    stream = sd.InputStream(
+        device=device_id,
+        channels=channels,
+        samplerate=sample_rate,
+        dtype="float32",
+        callback=callback,
+    )
+    stream.start()
+    try:
+        stop_event.wait()
+    finally:
+        stream.stop()
+        stream.close()
+    if not blocks:
+        return np.array([], dtype=np.float32).reshape(0, channels)
+    return np.concatenate(blocks, axis=0)

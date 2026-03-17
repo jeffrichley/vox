@@ -174,14 +174,14 @@ Use markdown checkboxes (`- [ ]`) for implementation phases and task bullets so 
 
 **Tasks:**
 
-- [ ] ADD dependencies: `pyperclip` (or platform clipboard); `pynput` (or chosen) for global hotkey and optional keyboard injection.
-- [ ] IMPLEMENT `src/vox/inject/clipboard.py`: set clipboard to string; raise on failure with clear message.
-- [ ] IMPLEMENT optional `src/vox/inject/keystroke.py`: paste (e.g. Ctrl+V) or type text into focused window; configurable on/off; document OS permissions (accessibility).
-- [ ] IMPLEMENT `src/vox/hotkey/register.py`: register global hotkey from config; on press start capture callback, on release stop capture and invoke callback with audio buffer (or path).
-- [ ] IMPLEMENT main loop in `cli.py`: `vox run` loads config, registers hotkey; on trigger: capture until release → transcribe(audio) → inject(text); loop until exit.
-- [ ] ADD integration test: mock capture + transcribe returning fixed string → inject to clipboard → assert clipboard content (or mock clipboard).
-- [ ] ADD error handling: mic unavailable, model not found, injection failed — all with actionable messages.
-- [ ] VALIDATE: `just test quality`; manual: `vox run`, hotkey, speak, release, check clipboard (and optional focused field).
+- [x] ADD dependencies: `pyperclip` (or platform clipboard); `pynput` (or chosen) for global hotkey and optional keyboard injection.
+- [x] IMPLEMENT `src/vox/inject/clipboard.py`: set clipboard to string; raise on failure with clear message.
+- [x] IMPLEMENT optional `src/vox/inject/keystroke.py`: paste (e.g. Ctrl+V) or type text into focused window; configurable on/off; document OS permissions (accessibility).
+- [x] IMPLEMENT `src/vox/hotkey/register.py`: register global hotkey from config; on press start capture callback, on release stop capture and invoke callback with audio buffer (or path).
+- [x] IMPLEMENT main loop in `cli.py`: `vox run` loads config, registers hotkey; on trigger: capture until release → transcribe(audio) → inject(text); loop until exit.
+- [x] ADD integration test: mock capture + transcribe returning fixed string → inject to clipboard → assert clipboard content (or mock clipboard).
+- [x] ADD error handling: mic unavailable, model not found, injection failed — all with actionable messages.
+- [x] VALIDATE: `just test quality`; manual: `vox run`, hotkey, speak, release, check clipboard (and optional focused field).
 
 ### Phase 4: Polish and docs (shippable MVP)
 
@@ -475,6 +475,41 @@ This mapping is the “no gaps” checklist. Each PRD MVP requirement must map t
 **Notes:**
 - test-mic uses get_config() for model_size/compute_type; on ValueError (no config) uses defaults base/float32 so test-mic works without ~/.vox/vox.toml.
 - Transcribe tests marked @pytest.mark.slow (load real tiny model).
+
+### Phase 3: Injection and hotkey (full push-to-talk loop) — Completed 2026-03-17
+
+**Branch:** `feat/001-push-to-talk` (unchanged).
+
+**Commands run and outcomes:**
+- `just quality && just test` — passed (all 28 tests, including unit test_inject and integration test_capture_transcribe_inject).
+
+**Files created:**
+- `src/vox/inject/clipboard.py` — set_clipboard(text), InjectError.
+- `src/vox/inject/keystroke.py` — paste_into_focused(), type_into_focused().
+- `src/vox/hotkey/register.py` — run_push_to_talk_loop(hotkey_str, device_id, sample_rate, channels, on_audio); parse hotkey, Listener on_press/on_release, record_until_stop in thread, queue for callback.
+- `tests/unit/test_inject.py` — set_clipboard tests (pyperclip mock).
+- `tests/integration/test_capture_transcribe_inject.py` — mock set_clipboard → verify copy called.
+
+**Files modified:**
+- `pyproject.toml` — dependencies pyperclip, pynput; per-file-ignores for hotkey/register.py (PLR0911, C901, PLR0915) with rationale.
+- `src/vox/capture/stream.py` — record_until_stop(stop_event, device_id, sample_rate, channels).
+- `src/vox/capture/__init__.py` — export record_until_stop.
+- `src/vox/inject/__init__.py` — export InjectError, set_clipboard, paste_into_focused, type_into_focused.
+- `src/vox/hotkey/__init__.py` — export run_push_to_talk_loop.
+- `src/vox/cli.py` — run(): get_config(), load_model(), run_push_to_talk_loop with on_audio (transcribe → set_clipboard → optional paste_into_focused); ConfigError, TranscriptionError, InjectError handling; Rich panel for hotkey hint.
+
+**Intent lock / acceptance gates:**
+- Clipboard module sets text and raises InjectError on failure.
+- Optional keystroke (paste_into_focused, type_into_focused) behind config injection_mode.
+- Hotkey registers from config; on release runs capture → transcribe → inject.
+- `vox run` starts, registers hotkey, on trigger places text in clipboard (and optionally pastes if injection_mode clipboard_and_paste).
+- Integration test: mock set_clipboard → assert pyperclip.copy called with text.
+- Errors for config/model/injection are actionable (CLI prints clear messages).
+- `just quality && just test` passes.
+
+**Notes:**
+- Hotkey uses pynput Listener (on_press/on_release); modifier normalization for ctrl_l/ctrl_r etc.; record_until_stop runs in a thread, stop_event set on release; processor thread joins and calls on_audio.
+- pyperclip type: ignore[import-untyped] (no stubs); per-file ruff ignores on register.py documented in pyproject.toml.
 
 ### Post-Phase 2 hardening (quality gates + custom errors) — Completed 2026-03-17
 
