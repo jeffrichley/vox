@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from collections.abc import Callable
 from queue import Queue
 
@@ -203,17 +204,35 @@ class _PushToTalkSession:
             self.queue.put((self.recording_thread, self.result_holder))
             self.recording_thread = None
             self.stop_event = None
-            self.result_holder = []
 
-    def run(self) -> None:
-        """Run the listener and processor until stopped (e.g. Ctrl+C)."""
+    def run(self, stop_event: threading.Event | None = None) -> None:
+        """Run the listener and processor until stopped.
+
+        If stop_event is set, the listener is stopped and run() returns.
+        """
+        listener_ref: list = []
         proc_thread = threading.Thread(target=self._processor_loop)
         proc_thread.start()
+
+        def watcher() -> None:
+            if stop_event is None:
+                return
+            stop_event.wait()
+            while not listener_ref:
+                time.sleep(0.05)
+            listener_ref[0].stop()
+
+        watcher_thread = (
+            threading.Thread(target=watcher) if stop_event is not None else None
+        )
+        if watcher_thread is not None:
+            watcher_thread.start()
         try:
             with keyboard.Listener(
                 on_press=self._on_press,
                 on_release=self._on_release,
             ) as listener:
+                listener_ref.append(listener)
                 listener.join()
         finally:
             self.queue.put(None)
@@ -226,12 +245,16 @@ def run_push_to_talk_loop(
     sample_rate: int,
     channels: int,
     on_audio: Callable[[np.ndarray], None],
+    stop_event: threading.Event | None = None,
 ) -> None:
     """Run push-to-talk: press hotkey to start recording, release to stop.
 
-    Blocks until the listener is stopped (e.g. Ctrl+C). On each hotkey release,
+    Blocks until the listener is stopped. On each hotkey release,
     on_audio(audio_buffer) is called with the recorded float32 mono array.
     Callbacks run in a dedicated processor thread to avoid blocking the listener.
+
+    If stop_event is provided and set from another thread, the listener stops
+    and this function returns (for use by CLI stop button, etc.).
 
     Args:
         hotkey_str: Combination like 'ctrl+shift+v' or 'ctrl+v'.
@@ -239,6 +262,7 @@ def run_push_to_talk_loop(
         sample_rate: Sample rate in Hz (e.g. 16000).
         channels: Number of channels (1 for mono).
         on_audio: Called with the recorded buffer (numpy array) on each release.
+        stop_event: Optional event; when set, the listener is stopped and run returns.
     """
     session = _PushToTalkSession(
         hotkey_str=hotkey_str,
@@ -247,4 +271,4 @@ def run_push_to_talk_loop(
         channels=channels,
         on_audio=on_audio,
     )
-    session.run()
+    session.run(stop_event=stop_event)

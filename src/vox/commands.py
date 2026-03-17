@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import numpy as np
 from rich.console import Console
 from rich.panel import Panel
@@ -72,16 +73,20 @@ def handle_test_mic(
     console.print("[green]Done.[/green]")
 
 
-def handle_run(console: Console) -> None:
+def handle_run(
+    console: Console,
+    stop_event: threading.Event | None = None,
+) -> None:
     """Start push-to-talk loop: hotkey to record, release to transcribe and inject.
 
     Loads config from ~/.vox/vox.toml (or VOX_CONFIG). On each hotkey release,
     recorded audio is transcribed and placed on the clipboard (and optionally
     pasted into the focused window if injection_mode is clipboard_and_paste).
-    Runs until KeyboardInterrupt.
+    Runs until stopped (KeyboardInterrupt or stop_event set).
 
     Args:
         console: Rich console for output.
+        stop_event: If set, the push-to-talk loop exits (e.g. for CLI stop button).
     """
     cfg = get_config()
     hotkey_str = cfg["hotkey"]
@@ -140,4 +145,5 @@ def handle_run(console: Console) -> None:
         sample_rate=sample_rate,
         channels=channels,
         on_audio=on_audio,
+        stop_event=stop_event,
     )
