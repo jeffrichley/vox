@@ -10,7 +10,8 @@ from vox.transcribe import transcribe
 
 @pytest.mark.integration
 @pytest.mark.slow
-def test_capture_then_transcribe_returns_string(requires_audio: None) -> None:
+@pytest.mark.usefixtures("requires_audio")
+def test_capture_then_transcribe_returns_string() -> None:
     """Short record -> transcribe returns a string (content may be empty)."""
     # Arrange - record a short sample
     samples = record_seconds(0.2, sample_rate=16000, channels=1)

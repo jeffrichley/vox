@@ -118,7 +118,8 @@ class TestRecordUntilStop:
 class TestRecordSeconds:
     """record_seconds() returns float32 array."""
 
-    def test_returns_float32_array(self, requires_audio: None) -> None:
+    @pytest.mark.usefixtures("requires_audio")
+    def test_returns_float32_array(self) -> None:
         """record_seconds returns numpy array float32 with expected shape."""
         # Arrange - pick a short duration to keep test fast
         seconds = 0.1
@@ -133,7 +134,8 @@ class TestRecordSeconds:
         assert samples.shape[1] == 1
         assert samples.shape[0] == int(seconds * 16000)
 
-    def test_record_accepts_device_id_none(self, requires_audio: None) -> None:
+    @pytest.mark.usefixtures("requires_audio")
+    def test_record_accepts_device_id_none(self) -> None:
         """record_seconds(..., device_id=None) uses default device."""
         # Arrange - choose small duration and default device
         seconds = 0.05
@@ -163,7 +165,8 @@ class TestPlayBack:
       Those belong in integration/e2e testing (or manual verification).
     """
 
-    def test_play_back_accepts_mono_array(self, requires_audio: None) -> None:
+    @pytest.mark.usefixtures("requires_audio")
+    def test_play_back_accepts_mono_array(self) -> None:
         """play_back(samples) with (n,) or (n,1) does not raise."""
         # Arrange - generate silent mono samples
         mono = np.zeros(1600, dtype=np.float32)  # 0.1 s at 16 kHz
@@ -173,7 +176,8 @@ class TestPlayBack:
 
         # Assert - no exception (implicit in pytest: exceptions fail the test)
 
-    def test_play_back_accepts_stereo_shape(self, requires_audio: None) -> None:
+    @pytest.mark.usefixtures("requires_audio")
+    def test_play_back_accepts_stereo_shape(self) -> None:
         """play_back with (n, 1) works."""
         # Arrange - generate silent (n, 1) samples
         mono = np.zeros((1600, 1), dtype=np.float32)
