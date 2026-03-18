@@ -24,8 +24,20 @@ jobs:
     # Only run on release event, or when release-please workflow succeeded (it just created a release)
     if: github.event_name == 'release' || github.event.workflow_run.conclusion == 'success'
     steps:
+      # When triggered by workflow_run, only proceed if the latest release was just created (within 5 min)
+      - name: Skip unless release is fresh (workflow_run only)
+        id: fresh
+        if: github.event_name == 'workflow_run'
+        run: |
+          TAG=$(gh release list --limit 1 -q .tagName)
+          CREATED=$(gh release view "$TAG" --json publishedAt -q .publishedAt)
+          NOW=$(date -u +%s)
+          CREATED_TS=$(date -d "${CREATED%%Z}Z" +%s 2>/dev/null || date -d "$CREATED" +%s 2>/dev/null)
+          if [ $((NOW - CREATED_TS)) -gt 300 ]; then echo "skip=1" >> $GITHUB_OUTPUT; else echo "skip=0" >> $GITHUB_OUTPUT; fi
+
       - name: Get release tag
         id: tag
+        if: github.event_name == 'release' || steps.fresh.outputs.skip != '1'
         run: |
           if [ -n "${{ github.event.release.tag_name }}" ]; then
             echo "tag=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
@@ -34,20 +46,25 @@ jobs:
           fi
 
       - name: Checkout
+        if: github.event_name == 'release' || steps.fresh.outputs.skip != '1'
         uses: actions/checkout@v4
         with:
           ref: ${{ steps.tag.outputs.tag }}
 
       - name: Install uv
+        if: github.event_name == 'release' || steps.fresh.outputs.skip != '1'
         uses: astral-sh/setup-uv@v4
 
       - name: Set up Python
+        if: github.event_name == 'release' || steps.fresh.outputs.skip != '1'
         run: uv python install 3.12
 
       - name: Build
+        if: github.event_name == 'release' || steps.fresh.outputs.skip != '1'
         run: uv build --no-sources
 
       - name: Publish to PyPI
+        if: github.event_name == 'release' || steps.fresh.outputs.skip != '1'
         run: uv publish
         # Trusted publishing: with id-token: write and no UV_PUBLISH_TOKEN,
         # uv obtains a short-lived token from PyPI via OIDC. If the index

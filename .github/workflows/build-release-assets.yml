@@ -18,8 +18,20 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'release' || github.event.workflow_run.conclusion == 'success'
     steps:
+      # When triggered by workflow_run, only proceed if the latest release was just created (within 5 min)
+      - name: Skip unless release is fresh (workflow_run only)
+        id: fresh
+        if: github.event_name == 'workflow_run'
+        run: |
+          TAG=$(gh release list --limit 1 -q .tagName)
+          CREATED=$(gh release view "$TAG" --json publishedAt -q .publishedAt)
+          NOW=$(date -u +%s)
+          CREATED_TS=$(date -d "${CREATED%%Z}Z" +%s 2>/dev/null || date -d "$CREATED" +%s 2>/dev/null)
+          if [ $((NOW - CREATED_TS)) -gt 300 ]; then echo "skip=1" >> $GITHUB_OUTPUT; else echo "skip=0" >> $GITHUB_OUTPUT; fi
+
       - name: Get release tag
         id: tag
+        if: github.event_name == 'release' || steps.fresh.outputs.skip != '1'
         run: |
           if [ -n "${{ github.event.release.tag_name }}" ]; then
             echo "tag=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
@@ -28,10 +40,12 @@ jobs:
           fi
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
+      skip: ${{ steps.fresh.outputs.skip }}
 
   build:
     name: Build ${{ matrix.platform }}
     needs: get-tag
+    if: needs.get-tag.outputs.skip != '1'
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -72,7 +86,7 @@ jobs:
         run: uv pip install pyinstaller
 
       - name: Build (PyInstaller onedir)
-        run: uv run pyinstaller --onedir --name vox --collect-all vox vox
+        run: uv run pyinstaller --onedir --name vox --paths src --collect-all vox src/vox/__main__.py
 
       - name: Smoke test (Windows)
         if: matrix.platform == 'windows'
