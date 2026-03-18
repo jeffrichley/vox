@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.3](https://github.com/jeffrichley/vox/compare/v0.2.2...v0.2.3) (2026-03-18)
+
+
+### Bug Fixes
+
+* **cli/workflow:** make PyInstaller --help headless-safe ([5762345](https://github.com/jeffrichley/vox/commit/5762345b8e951f66e5fa738750c1a9f4b4add383))
+* **cli:** lazy import audio/hotkey modules ([e4f53e4](https://github.com/jeffrichley/vox/commit/e4f53e420557017fadd472edc4b57a3baf439502))
+
 ## [0.2.2](https://github.com/jeffrichley/vox/compare/v0.2.1...v0.2.2) (2026-03-18)
 
 
