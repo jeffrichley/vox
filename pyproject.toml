@@ -1,6 +1,6 @@
 [project]
 name = "vox-core"
-version = "0.2.1"
+version = "0.2.2"
 description = "Voice input layer: captures spoken intent, transcribes locally, injects into active workflow or agent pipeline."
 readme = "README.md"
 license = "MIT"
