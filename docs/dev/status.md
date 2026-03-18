@@ -25,3 +25,4 @@ last_updated: 2026-03-17
 - **2026-03-17:** 002 Phase 2 executed. System tray with Quit; config `use_tray` and `VOX_TRAY=1`; `src/vox/gui/tray.py` and icon; `just test-quality` passed.
 - **2026-03-17:** 002 Phase 1 executed. Default command UX: `vox` (no args) runs push-to-talk; `vox run` retained. Branch `feat/002-tray-packaging-ux`; `just test-quality` passed.
 - **2026-03-17:** Phase 4 completed. README, example config, docs/dev/status.md in place. MVP satisfiable per Definition of Visible Done in README.
+
