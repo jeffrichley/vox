@@ -88,15 +88,28 @@ jobs:
       - name: Install PyInstaller
         run: uv pip install pyinstaller
 
-      - name: Build (PyInstaller onedir)
-        run: uv run pyinstaller --onedir --name vox --paths src --collect-all vox src/vox/__main__.py
+      - name: Install xvfb (Linux)
+        if: matrix.platform == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      - name: Build (PyInstaller onedir) (Windows / macOS)
+        if: matrix.platform != 'linux'
+        run: uv run pyinstaller --onedir --noconfirm --name vox --paths src --collect-all vox src/vox/__main__.py
+
+      - name: Build (PyInstaller onedir) (Linux)
+        if: matrix.platform == 'linux'
+        run: xvfb-run -a uv run pyinstaller --onedir --noconfirm --name vox --paths src --collect-all vox src/vox/__main__.py
 
       - name: Smoke test (Windows)
         if: matrix.platform == 'windows'
         run: .\dist\vox\vox.exe --help
 
-      - name: Smoke test (macOS / Linux)
-        if: matrix.platform != 'windows'
+      - name: Smoke test (Linux)
+        if: matrix.platform == 'linux'
+        run: xvfb-run -a ./dist/vox/vox --help
+
+      - name: Smoke test (macOS)
+        if: matrix.platform == 'macos'
         run: ./dist/vox/vox --help
 
       - name: Create archive (Windows)

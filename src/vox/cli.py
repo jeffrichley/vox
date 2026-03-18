@@ -6,8 +6,6 @@ import typer
 from rich.console import Console
 
 from vox.config import ConfigError, get_config
-from vox.gui import run_stop_window, run_tray
-from vox.transcribe import TranscriptionError
 
 
 class RunWindowError(Exception):
@@ -35,6 +33,13 @@ def _run_impl() -> None:
     Raises:
         Exit: Code 1 if config is invalid or the worker failed (e.g. model error).
     """
+    # IMPORTANT: keep GUI / input-hook imports lazy.
+    # `./dist/vox/vox --help` still imports `vox.cli` via `vox.__main__`, so any
+    # import-time side effects (e.g. `pynput` selecting an X backend) would break
+    # help in headless environments.
+    from vox.gui import run_stop_window, run_tray
+    from vox.transcribe import TranscriptionError
+
     try:
         cfg = get_config()
     except ConfigError as e:
@@ -64,6 +69,10 @@ def _default_callback(ctx: typer.Context) -> None:
     Args:
         ctx: Typer context; used to detect if a subcommand was invoked.
     """
+    # During Click/Typer help/usage generation, Click performs a resilient parse
+    # pass. In that mode we must not start the capture/transcribe/inject loop.
+    if getattr(ctx, "resilient_parsing", False):
+        return
     if ctx.invoked_subcommand is not None:
         return
     _run_impl()
