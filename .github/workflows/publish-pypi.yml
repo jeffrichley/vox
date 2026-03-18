@@ -25,6 +25,7 @@ jobs:
     if: github.event_name == 'release' || github.event.workflow_run.conclusion == 'success'
     env:
       GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
     steps:
       # When triggered by workflow_run, only proceed if the latest release was just created (within 5 min)
       - name: Skip unless release is fresh (workflow_run only)
