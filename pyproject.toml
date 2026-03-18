@@ -32,6 +32,7 @@ dependencies = [
 
 [project.scripts]
 vox = "vox.cli:main"
+vox-core = "vox.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/jeffrichley/vox"
