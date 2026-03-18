@@ -31,7 +31,7 @@ jobs:
         id: fresh
         if: github.event_name == 'workflow_run'
         run: |
-          TAG=$(gh release list --limit 1 -q .tagName)
+          TAG=$(gh release list --limit 1 --json tagName -q '.[0].tagName')
           CREATED=$(gh release view "$TAG" --json publishedAt -q .publishedAt)
           NOW=$(date -u +%s)
           CREATED_TS=$(date -d "${CREATED%%Z}Z" +%s 2>/dev/null || date -d "$CREATED" +%s 2>/dev/null)
@@ -44,7 +44,7 @@ jobs:
           if [ -n "${{ github.event.release.tag_name }}" ]; then
             echo "tag=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
           else
-            echo "tag=$(gh release list --limit 1 -q .tagName)" >> $GITHUB_OUTPUT
+            echo "tag=$(gh release list --limit 1 --json tagName -q '.[0].tagName')" >> $GITHUB_OUTPUT
           fi
 
       - name: Checkout
