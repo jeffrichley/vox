@@ -6,8 +6,12 @@ import threading
 
 import numpy as np
 
-# sounddevice has no py.typed/stubs; ignore for type-checking only (plan Phase 1).
-import sounddevice as sd  # type: ignore[import-untyped]
+def _sd():
+    # sounddevice loads PortAudio at import time; keep this lazy so `vox --help`
+    # works on machines without PortAudio installed.
+    import sounddevice as sd  # type: ignore[import-untyped]
+
+    return sd
 
 
 def list_devices() -> list[tuple[int, str, str]]:
@@ -25,6 +29,7 @@ def list_devices() -> list[tuple[int, str, str]]:
     """
     result: list[tuple[int, str, str]] = []
     try:
+        sd = _sd()
         devices = sd.query_devices()
         for i, dev in enumerate(devices):
             if dev.get("max_input_channels", 0) > 0:
@@ -33,7 +38,7 @@ def list_devices() -> list[tuple[int, str, str]]:
                 hostapi_info = sd.query_hostapis(hostapi_idx)
                 hostapi_name = hostapi_info.get("name", "?")
                 result.append((i, str(name), str(hostapi_name)))
-    except sd.PortAudioError as e:
+    except Exception as e:
         raise RuntimeError(
             "No audio devices available; check microphone access and permissions."
         ) from e
@@ -58,6 +63,7 @@ def record_seconds(
         numpy array (frames, channels) float32 in [-1, 1].
     """
     frames = int(seconds * sample_rate)
+    sd = _sd()
     rec: np.ndarray = np.asarray(
         sd.rec(
             frames=frames,
@@ -80,6 +86,7 @@ def play_back(samples: np.ndarray, sample_rate: int = 16000) -> None:
     """
     if samples.ndim == 1:
         samples = samples[:, np.newaxis]
+    sd = _sd()
     sd.play(samples, samplerate=sample_rate)
     sd.wait()
 
@@ -106,6 +113,7 @@ def record_until_stop(
         numpy array (frames, channels) float32 in [-1, 1]; empty if no frames.
     """
     blocks: list[np.ndarray] = []
+    sd = _sd()
 
     def callback(
         indata: np.ndarray,
