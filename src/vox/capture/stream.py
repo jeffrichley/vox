@@ -6,6 +6,7 @@ import threading
 
 import numpy as np
 
+
 def _sd():
     # sounddevice loads PortAudio at import time; keep this lazy so `vox --help`
     # works on machines without PortAudio installed.

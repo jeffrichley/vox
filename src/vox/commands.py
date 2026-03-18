@@ -11,7 +11,6 @@ from rich.table import Table
 
 from vox.capture import list_devices, play_back, record_seconds
 from vox.config import get_config, get_transcription_options
-from vox.hotkey import run_push_to_talk_loop
 from vox.inject import InjectError, paste_into_focused, set_clipboard
 from vox.transcribe import TranscriptionError, load_model, transcribe
 
@@ -89,6 +88,8 @@ def handle_run(
         console: Rich console for output.
         stop_event: If set, the push-to-talk loop exits (e.g. for CLI stop button).
     """
+    from vox.hotkey import run_push_to_talk_loop
+
     cfg = get_config()
     hotkey_str = cfg["hotkey"]
     device_id = cfg.get("device_id")

@@ -5,7 +5,6 @@ from __future__ import annotations
 import typer
 from rich.console import Console
 
-from vox.commands import handle_devices, handle_test_mic
 from vox.config import ConfigError, get_config
 from vox.gui import run_stop_window, run_tray
 from vox.transcribe import TranscriptionError
@@ -81,6 +80,8 @@ def devices() -> None:
         Exit: Exit with code 1 if listing devices fails (typer.Exit).
     """
     try:
+        from vox.commands import handle_devices
+
         handle_devices(console)
     except RuntimeError as e:
         console.print(f"[red]Error:[/red] {e}")
@@ -106,6 +107,8 @@ def test_mic(
         Exit: Code 1 if seconds <= 0 or on capture/transcribe error (typer.Exit).
     """
     try:
+        from vox.commands import handle_test_mic
+
         handle_test_mic(console, device_id=device, seconds=seconds)
     except (ValueError, ConfigError, TranscriptionError, RuntimeError) as e:
         console.print(f"[red]Error:[/red] {e}")
