@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from importlib import import_module
+from typing import Protocol, cast
+
 import typer
 from rich.console import Console
 
@@ -24,6 +28,48 @@ app = typer.Typer(
 console = Console()
 
 
+class CommandsModuleProtocol(Protocol):
+    """Minimal command module protocol used by the CLI layer."""
+
+    handle_devices: Callable[[Console], None]
+    handle_test_mic: Callable[[Console, int | None, float], None]
+
+
+def _commands_module() -> CommandsModuleProtocol:
+    """Return the lazily imported command implementation module.
+
+    Returns:
+        The imported command module cast to the local protocol.
+    """
+    return cast(CommandsModuleProtocol, import_module("vox.commands"))
+
+
+def _gui_runners() -> tuple[
+    Callable[[Console], BaseException | None],
+    Callable[[Console], BaseException | None],
+]:
+    """Return the lazy GUI runner functions (stop window, tray).
+
+    Returns:
+        The stop-window runner and tray runner, in that order.
+    """
+    gui_module = import_module("vox.gui")
+    return (
+        cast(Callable[[Console], BaseException | None], gui_module.run_stop_window),
+        cast(Callable[[Console], BaseException | None], gui_module.run_tray),
+    )
+
+
+def _transcription_error_type() -> type[BaseException]:
+    """Return the lazily imported transcription exception type.
+
+    Returns:
+        The TranscriptionError class from vox.transcribe.
+    """
+    transcribe_module = import_module("vox.transcribe")
+    return cast(type[BaseException], transcribe_module.TranscriptionError)
+
+
 def _run_impl() -> None:
     """Run push-to-talk (tray or stop window + worker).
 
@@ -33,18 +79,16 @@ def _run_impl() -> None:
     Raises:
         Exit: Code 1 if config is invalid or the worker failed (e.g. model error).
     """
-    # IMPORTANT: keep GUI / input-hook imports lazy.
-    # `./dist/vox/vox --help` still imports `vox.cli` via `vox.__main__`, so any
-    # import-time side effects (e.g. `pynput` selecting an X backend) would break
-    # help in headless environments.
-    from vox.gui import run_stop_window, run_tray
-    from vox.transcribe import TranscriptionError
-
     try:
         cfg = get_config()
     except ConfigError as e:
         console.print(f"[red]Config error:[/red] {e}")
         raise typer.Exit(1) from e
+    # IMPORTANT: keep GUI / input-hook imports lazy.
+    # `./dist/vox/vox --help` still imports `vox.cli` via `vox.__main__`, so any
+    # import-time side effects (e.g. `pynput` selecting an X backend) would break
+    # help in headless environments.
+    run_stop_window, run_tray = _gui_runners()
     use_tray = cfg.get("use_tray", False)
     runner = run_tray if use_tray else run_stop_window
     try:
@@ -55,7 +99,7 @@ def _run_impl() -> None:
         cause = e.__cause__
         if isinstance(cause, ConfigError):
             console.print(f"[red]Config error:[/red] {cause}")
-        elif isinstance(cause, TranscriptionError):
+        elif isinstance(cause, _transcription_error_type()):
             console.print(f"[red]Model error:[/red] {cause}")
         elif cause is not None:
             console.print(f"[red]Error:[/red] {cause}")
@@ -89,8 +133,7 @@ def devices() -> None:
         Exit: Exit with code 1 if listing devices fails (typer.Exit).
     """
     try:
-        from vox.commands import handle_devices
-
+        handle_devices = _commands_module().handle_devices
         handle_devices(console)
     except RuntimeError as e:
         console.print(f"[red]Error:[/red] {e}")
@@ -116,12 +159,21 @@ def test_mic(
         Exit: Code 1 if seconds <= 0 or on capture/transcribe error (typer.Exit).
     """
     try:
-        from vox.commands import handle_test_mic
-
-        handle_test_mic(console, device_id=device, seconds=seconds)
-    except (ValueError, ConfigError, TranscriptionError, RuntimeError) as e:
-        console.print(f"[red]Error:[/red] {e}")
-        raise typer.Exit(1) from e
+        handle_test_mic = _commands_module().handle_test_mic
+        handle_test_mic(console, device, seconds)
+    except Exception as e:
+        if isinstance(
+            e,
+            (
+                ValueError,
+                ConfigError,
+                RuntimeError,
+                _transcription_error_type(),
+            ),
+        ):
+            console.print(f"[red]Error:[/red] {e}")
+            raise typer.Exit(1) from e
+        raise
 
 
 @app.command()

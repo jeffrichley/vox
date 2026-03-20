@@ -137,7 +137,7 @@ class TestHandleRun:
         with (
             mock.patch("vox.commands.get_config") as mock_cfg,
             mock.patch("vox.commands.load_model"),
-            mock.patch("vox.hotkey.run_push_to_talk_loop") as mock_loop,
+            mock.patch("vox.commands._run_push_to_talk_loop") as mock_loop,
         ):
             mock_cfg.return_value = {
                 "hotkey": "ctrl+v",
@@ -170,7 +170,7 @@ class TestHandleRun:
         with (
             mock.patch("vox.commands.get_config") as mock_cfg,
             mock.patch("vox.commands.load_model"),
-            mock.patch("vox.hotkey.run_push_to_talk_loop", side_effect=capture_loop),
+            mock.patch("vox.commands._run_push_to_talk_loop", side_effect=capture_loop),
         ):
             mock_cfg.return_value = {
                 "hotkey": "ctrl+v",
@@ -211,7 +211,7 @@ class TestHandleRun:
         with (
             mock.patch("vox.commands.get_config") as mock_cfg,
             mock.patch("vox.commands.load_model"),
-            mock.patch("vox.hotkey.run_push_to_talk_loop", side_effect=capture_loop),
+            mock.patch("vox.commands._run_push_to_talk_loop", side_effect=capture_loop),
         ):
             mock_cfg.return_value = {
                 "hotkey": "ctrl+v",
@@ -253,7 +253,7 @@ class TestHandleRun:
         with (
             mock.patch("vox.commands.get_config") as mock_cfg,
             mock.patch("vox.commands.load_model"),
-            mock.patch("vox.hotkey.run_push_to_talk_loop", side_effect=capture_loop),
+            mock.patch("vox.commands._run_push_to_talk_loop", side_effect=capture_loop),
         ):
             mock_cfg.return_value = {
                 "hotkey": "ctrl+v",
@@ -290,7 +290,7 @@ class TestHandleRun:
         with (
             mock.patch("vox.commands.get_config") as mock_cfg,
             mock.patch("vox.commands.load_model"),
-            mock.patch("vox.hotkey.run_push_to_talk_loop", side_effect=capture_loop),
+            mock.patch("vox.commands._run_push_to_talk_loop", side_effect=capture_loop),
         ):
             mock_cfg.return_value = {
                 "hotkey": "ctrl+v",
@@ -333,7 +333,7 @@ class TestHandleRun:
         with (
             mock.patch("vox.commands.get_config") as mock_cfg,
             mock.patch("vox.commands.load_model"),
-            mock.patch("vox.hotkey.run_push_to_talk_loop", side_effect=capture_loop),
+            mock.patch("vox.commands._run_push_to_talk_loop", side_effect=capture_loop),
         ):
             mock_cfg.return_value = {
                 "hotkey": "ctrl+v",
@@ -380,7 +380,7 @@ class TestHandleRun:
         with (
             mock.patch("vox.commands.get_config") as mock_cfg,
             mock.patch("vox.commands.load_model"),
-            mock.patch("vox.hotkey.run_push_to_talk_loop", side_effect=capture_loop),
+            mock.patch("vox.commands._run_push_to_talk_loop", side_effect=capture_loop),
         ):
             mock_cfg.return_value = {
                 "hotkey": "ctrl+v",
@@ -423,7 +423,7 @@ class TestHandleRun:
         with (
             mock.patch("vox.commands.get_config") as mock_cfg,
             mock.patch("vox.commands.load_model"),
-            mock.patch("vox.hotkey.run_push_to_talk_loop", side_effect=capture_loop),
+            mock.patch("vox.commands._run_push_to_talk_loop", side_effect=capture_loop),
         ):
             mock_cfg.return_value = {
                 "hotkey": "ctrl+v",
