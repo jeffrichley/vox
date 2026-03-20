@@ -7,7 +7,7 @@ from unittest import mock
 import pytest
 import typer
 
-from vox.cli import devices, run
+from vox.cli import devices, run, settings
 from vox.cli import test_mic as cli_test_mic  # alias so pytest does not collect as test
 from vox.config import ConfigError
 from vox.transcribe import TranscriptionError
@@ -244,3 +244,56 @@ class TestRunCommand:
             # Assert - generic Error message printed
             calls = [str(c) for c in mock_console.print.call_args_list]
             assert any("Error" in c or "red" in c for c in calls)
+
+
+@pytest.mark.unit
+class TestSettingsCommand:
+    """settings() opens the standalone settings window or exits 1 on failure."""
+
+    def test_settings_calls_direct_settings_launcher(self) -> None:
+        """The CLI settings command should invoke the direct settings launcher."""
+        # Arrange - a launcher with a direct run entrypoint
+        mock_launcher = mock.Mock()
+        mock_launcher.SettingsLaunchError = RuntimeError
+
+        with mock.patch("vox.cli._settings_launcher", return_value=mock_launcher):
+            # Act - run the settings command
+            settings()
+
+        # Assert - the direct launcher was used
+        mock_launcher.run_settings_window_direct.assert_called_once_with()
+
+    def test_settings_exits_1_when_launcher_fails(self) -> None:
+        """Launcher failures should surface as a user-safe CLI exit."""
+        # Arrange - a launcher whose direct entrypoint fails
+        mock_launcher = mock.Mock()
+        mock_launcher.SettingsLaunchError = RuntimeError
+        mock_launcher.run_settings_window_direct.side_effect = RuntimeError("no gui")
+
+        with (
+            mock.patch("vox.cli._settings_launcher", return_value=mock_launcher),
+            pytest.raises(typer.Exit) as exc_info,
+        ):
+            # Act - run settings against a failing launcher
+            settings()
+
+        # Assert - the command exits with code 1
+        assert exc_info.value.exit_code == 1
+
+    def test_settings_prints_error_when_launcher_fails(self) -> None:
+        """Launcher failures should print a user-visible error message."""
+        # Arrange - a failing launcher and mocked console
+        mock_launcher = mock.Mock()
+        mock_launcher.SettingsLaunchError = RuntimeError
+        mock_launcher.run_settings_window_direct.side_effect = RuntimeError("no gui")
+
+        with (
+            mock.patch("vox.cli.console") as mock_console,
+            mock.patch("vox.cli._settings_launcher", return_value=mock_launcher),
+            pytest.raises(typer.Exit),
+        ):
+            # Act - run settings against a failing launcher
+            settings()
+
+        # Assert - the CLI printed a user-safe error
+        mock_console.print.assert_called_once()

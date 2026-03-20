@@ -2010,6 +2010,7 @@ name = "vox-core"
 version = "0.2.3"
 source = { editable = "." }
 dependencies = [
+    { name = "av" },
     { name = "faster-whisper" },
     { name = "numpy" },
     { name = "pillow" },
@@ -2044,6 +2045,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "av", specifier = ">=17.0.0" },
     { name = "faster-whisper", specifier = ">=1.0.0,<2" },
     { name = "numpy", specifier = ">=1.26.0" },
     { name = "pillow", specifier = ">=10.0.0" },

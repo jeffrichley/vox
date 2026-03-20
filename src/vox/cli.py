@@ -35,6 +35,13 @@ class CommandsModuleProtocol(Protocol):
     handle_test_mic: Callable[[Console, int | None, float], None]
 
 
+class SettingsLauncherProtocol(Protocol):
+    """Minimal settings-launcher protocol used by the CLI layer."""
+
+    run_settings_window_direct: Callable[[], None]
+    SettingsLaunchError: type[BaseException]
+
+
 def _commands_module() -> CommandsModuleProtocol:
     """Return the lazily imported command implementation module.
 
@@ -42,6 +49,15 @@ def _commands_module() -> CommandsModuleProtocol:
         The imported command module cast to the local protocol.
     """
     return cast(CommandsModuleProtocol, import_module("vox.commands"))
+
+
+def _settings_launcher() -> SettingsLauncherProtocol:
+    """Return the lazily imported settings-launcher module.
+
+    Returns:
+        The imported settings-launcher module cast to the local protocol.
+    """
+    return cast(SettingsLauncherProtocol, import_module("vox.gui.settings_launcher"))
 
 
 def _gui_runners() -> tuple[
@@ -187,6 +203,23 @@ def run() -> None:
     the worker failed (e.g. config or model error).
     """
     _run_impl()
+
+
+@app.command()
+def settings() -> None:
+    """Open the standalone autosaving settings window.
+
+    Raises:
+        Exit: Code 1 if the settings window cannot be launched.
+    """
+    launcher = _settings_launcher()
+    try:
+        launcher.run_settings_window_direct()
+    except Exception as e:
+        if isinstance(e, launcher.SettingsLaunchError | RuntimeError):
+            console.print(f"[red]Error:[/red] {e}")
+            raise typer.Exit(1) from e
+        raise
 
 
 def main() -> None:

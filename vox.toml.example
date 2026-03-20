@@ -1,5 +1,6 @@
 # Vox config example. Copy to ~/.vox/vox.toml and edit.
 # Override path with VOX_CONFIG env. Env vars VOX_HOTKEY, VOX_DEVICE_ID, etc. override these values.
+# Or open `vox settings` and let the supported fields autosave back to this file.
 
 # Required: global hotkey to start/stop recording. Format: modifier+key (e.g. ctrl+shift+v).
 hotkey = "ctrl+shift+v"
@@ -22,6 +23,11 @@ compute_device = "cpu"
 # Optional: use system tray instead of the Stop window. Default: false.
 # When true, Vox shows a tray icon; choose Quit from the menu to stop. Env: VOX_TRAY=1.
 # use_tray = false
+
+# Optional: recording cue playback volume from 0.0 to 1.0. Default: 0.5.
+# Set lower if the start/end cues are too loud. In `vox settings`, slider changes
+# autosave after a short debounce and then preview the cue automatically. Env: VOX_CUE_VOLUME.
+cue_volume = 0.5
 
 # Optional: how to inject transcribed text.
 # - "clipboard": only set clipboard (default).

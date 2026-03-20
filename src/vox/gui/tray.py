@@ -23,6 +23,7 @@ from PIL import Image
 from rich.console import Console
 
 from vox.commands import handle_run
+from vox.gui.settings_launcher import launch_settings_from_runtime
 
 
 def _load_icon_image() -> Image.Image:
@@ -33,6 +34,18 @@ def _load_icon_image() -> Image.Image:
     """
     data = (files("vox.gui") / "vox_icon.png").read_bytes()
     return Image.open(io.BytesIO(data)).copy()
+
+
+def _launch_settings(console: Console) -> bool:
+    """Launch settings from the tray surface.
+
+    Args:
+        console: Console used for user-visible launcher failures.
+
+    Returns:
+        True when launch succeeds; False when it fails and is reported.
+    """
+    return launch_settings_from_runtime(console)
 
 
 def run_tray(console: Console) -> BaseException | None:
@@ -76,11 +89,18 @@ def run_tray(console: Console) -> BaseException | None:
         stop_event.set()
         icon.stop()
 
+    def on_settings(_icon: pystray.Icon, _item: pystray.MenuItem) -> None:
+        """Launch the standalone settings window without blocking the tray."""
+        _launch_settings(console)
+
     thread = threading.Thread(target=run_worker, daemon=True)
     thread.start()
 
     image = _load_icon_image()
-    menu = pystray.Menu(pystray.MenuItem("Quit", on_quit))
+    menu = pystray.Menu(
+        pystray.MenuItem("Settings...", on_settings),
+        pystray.MenuItem("Quit", on_quit),
+    )
     icon = pystray.Icon("vox", image, "Vox — push-to-talk", menu=menu)
     icon.run()
 
