@@ -198,7 +198,7 @@ Build PyInstaller **onedir** artifacts for Windows, macOS, and Linux on each Git
 
 - [x] **ADD** `.github/workflows/build-release-assets.yml`: trigger `release: published`; matrix (windows, macos, linux); checkout release tag; `uv sync`; `uv pip install pyinstaller`; PyInstaller `--onedir --name vox`; platform-specific smoke test; platform-specific archive (zip/tar.gz); upload to release via `softprops/action-gh-release`.
 - [x] **UPDATE** README: "Pre-built binaries (GitHub Releases)" section — link to Releases, describe download/unpack/run per platform; note first-run model download; optional note on unsigned binaries.
-- [ ] **VALIDATE** Next release triggers workflow; three artifacts appear on the release; manual run of one artifact confirms binary works.
+- [x] **VALIDATE** Next release triggers workflow; three artifacts appear on the release; manual run of one artifact confirms binary works.
 
 ---
 
@@ -463,7 +463,7 @@ Code and CI for Phase 3 are in place. To close Phase 3:
 - Added `.github/workflows/build-release-assets.yml`: trigger `release: published`; single job with matrix (windows / macos / linux); checkout at release tag; Python 3.12 + uv; `uv sync --frozen --all-groups`; `uv pip install pyinstaller` (non-mutating); `uv run pyinstaller --onedir --name vox --collect-all vox vox`; explicitly platform-specific smoke test steps (Windows: `.\dist\vox\vox.exe --help`; macOS/Linux: `./dist/vox/vox --help`); explicitly platform-specific archive steps (Windows: `Compress-Archive`; macOS: `zip`; Linux: `tar -czvf`); upload to release via `softprops/action-gh-release@v2` with `files: ${{ env.ARTIFACT_NAME }}`.
 - Updated README: new subsection "Pre-built binaries (GitHub Releases)" under Install — link to Releases, per-platform download/unpack/run (Windows: `vox.exe` in folder; macOS/Linux: `./vox/vox`), first-run Whisper model note, unsigned-binaries note.
 
-**Pending:** VALIDATE on next release — workflow runs, three artifacts attached, manual run of one binary (e.g. `vox --help`, `vox devices`) confirms it works. If PyInstaller misses modules (e.g. faster-whisper), plan follow-up phase for `vox.spec`.
+**Validation confirmed:** Next release triggered the workflow, all three release artifacts were attached, and manual validation of a packaged binary succeeded. No follow-up packaging work is currently required. If PyInstaller later misses modules (e.g. faster-whisper), plan a follow-up phase for `vox.spec`.
 
 ### Validation run (2026-03-17) — `.ai/COMMANDS/validate.md` + plan 002
 
