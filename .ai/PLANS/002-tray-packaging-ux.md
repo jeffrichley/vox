@@ -163,10 +163,10 @@ Publish the package to PyPI so Vox is installable as a **tool** and can be invok
 - [x] **UPDATE** `README.md`: Add “Install” section with `uvx vox` and `pip install vox`; note that running from source remains `uv run vox` or `uv sync && vox`.
 - [x] **DOCUMENT** (in plan or docs/dev): Publish steps — `uv build`, `uv publish` (with token or trusted publisher); optional TestPyPI first.
 - [x] **VALIDATE** `uv build` succeeds; run from built wheel locally (`uv pip install dist/*.whl` then `vox`) to confirm entry point; `just test-quality` passes.
-- [ ] **ADD release-please:** Add `.github/workflows/release-please.yml` and config (e.g. `release-please-config.json`) so releases are driven by [release-please](https://github.com/googleapis/release-please): conventional commits → release PR → merge → GitHub release (tag) created. No manual version bumps or publish from local.
-- [ ] **ADD PyPI publish workflow (Trusted Publishers):** Add `.github/workflows/publish-pypi.yml` that runs on `release: published`, builds with `uv build --no-sources`, and runs `uv publish`. Use [PyPI Trusted Publishers](https://docs.pypi.org/trusted-publishers/) (OIDC): workflow requests `id-token: write`; GitHub Actions issues a short-lived token to PyPI; **no long-lived API token** stored in secrets. Optionally use a `pypi` environment for approval gates.
-- [ ] **One-time PyPI setup:** On PyPI, add a Trusted Publisher for this repo: owner, repo name, workflow filename (e.g. `publish-pypi.yml`), and optionally environment `pypi`. See [Adding a Trusted Publisher](https://docs.pypi.org/trusted-publishers/adding-a-publisher/).
-- [ ] **VERIFY** without local install: After the first release has been published by the workflow, from a directory that is **not** the vox repo run `uvx vox-core --help` and `uvx vox-core devices`. Phase 3 is complete when these succeed (tool is fetched from PyPI and runs with no local clone or install).
+- [x] **ADD release-please:** Add `.github/workflows/release-please.yml` and config (e.g. `release-please-config.json`) so releases are driven by [release-please](https://github.com/googleapis/release-please): conventional commits → release PR → merge → GitHub release (tag) created. No manual version bumps or publish from local.
+- [x] **ADD PyPI publish workflow (Trusted Publishers):** Add `.github/workflows/publish-pypi.yml` that runs on `release: published`, builds with `uv build --no-sources`, and runs `uv publish`. Use [PyPI Trusted Publishers](https://docs.pypi.org/trusted-publishers/) (OIDC): workflow requests `id-token: write`; GitHub Actions issues a short-lived token to PyPI; **no long-lived API token** stored in secrets. Optionally use a `pypi` environment for approval gates.
+- [x] **One-time PyPI setup:** On PyPI, add a Trusted Publisher for this repo: owner, repo name, workflow filename (e.g. `publish-pypi.yml`), and optionally environment `pypi`. See [Adding a Trusted Publisher](https://docs.pypi.org/trusted-publishers/adding-a-publisher/).
+- [x] **VERIFY** without local install: After the first release has been published by the workflow, from a directory that is **not** the vox repo run `uvx vox-core --help` and `uvx vox-core devices`. Phase 3 is complete when these succeed (tool is fetched from PyPI and runs with no local clone or install).
 
 ---
 
@@ -335,8 +335,8 @@ Execute in order. Phase 4 is optional and can be a separate PR.
 - [x] `vox` with no subcommand starts the run loop; `vox run` still works.
 - [x] Tray icon appears when run with tray enabled; Quit from tray exits cleanly.
 - [x] `uv build` succeeds; PyPI metadata (classifiers, urls) present; README documents `uvx vox-core` and `pip install vox-core`.
-- [ ] Package **published to PyPI** (vox-core); **`uvx vox-core --help` and `uvx vox-core devices` succeed from a directory that is not the vox repo** (no local install).
-- [ ] `just test-quality` passes; no regressions in existing tests (run after closing any running Vox/tray to avoid venv lock).
+- [x] Package **published to PyPI** (vox-core); **`uvx vox-core --help` and `uvx vox-core devices` succeed from a directory that is not the vox repo** (no local install).
+- [x] `just test-quality` passes; no regressions in existing tests (run after closing any running Vox/tray to avoid venv lock).
 - [x] GUI code (tray, stop_window) remains omitted from coverage; no new pragmas in cli.
 
 ---
@@ -345,7 +345,7 @@ Execute in order. Phase 4 is optional and can be a separate PR.
 
 - [x] Phase 1 default command done and validated.
 - [x] Phase 2 tray done and validated.
-- [ ] Phase 3 complete when: PyPI metadata and docs done, **package published to PyPI (vox-core)**, and **`uvx vox-core` verified from a non-project context** (no local install).
+- [x] Phase 3 complete when: PyPI metadata and docs done, **package published to PyPI (vox-core)**, and **`uvx vox-core` verified from a non-project context** (no local install).
 - [x] README updated; build validated; publish steps documented.
 
 ---
@@ -453,9 +453,9 @@ Code and CI for Phase 3 are in place. To close Phase 3:
 - Documented publish steps in plan: **Publish steps (Phase 3)** with `uv build`, optional TestPyPI, `uv publish`, and verify with `uvx vox-core --help`.
 - Validated: `uv build` succeeded — produced wheel and sdist (package name vox-core).
 
-**Note:** Local wheel install (`uv pip install dist/*.whl`) was not run because `vox.exe` was in use (Vox tray running). Exit Vox from the tray, then run `just test-quality` to confirm full gate. Phase 3 changed only metadata and docs; no application code changes.
+**Note:** release-please workflow, PyPI Trusted Publisher publish workflow, and non-project `uvx vox-core` verification are now complete and manually confirmed. Phase 3 changed metadata/docs plus release automation and has been validated as shipped.
 
-**Ready for commit:** Phase 3 complete. After publishing to PyPI (vox-core), users can run `uvx vox-core` or `pip install vox-core` then `vox`.
+**Ready for commit:** Phase 3 complete. Users can run `uvx vox-core` or `pip install vox-core` then `vox`.
 
 ### Phase 4: PyInstaller release assets — 2026-03-17
 

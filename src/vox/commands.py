@@ -11,7 +11,7 @@ from rich.table import Table
 
 from vox.capture import list_devices, play_back, record_seconds
 from vox.config import get_config, get_transcription_options
-from vox.inject import InjectError, paste_into_focused, set_clipboard
+from vox.inject import InjectError, paste_into_focused, set_clipboard, type_into_focused
 from vox.transcribe import TranscriptionError, load_model, transcribe
 
 
@@ -120,6 +120,14 @@ def handle_run(
             return
         if not text.strip():
             console.print("[dim]No speech detected.[/dim]")
+            return
+        if injection_mode == "type":
+            try:
+                type_into_focused(text)
+            except InjectError as e:
+                console.print(f"[red]Typing error:[/red] {e}")
+                return
+            console.print("[green]Injected.[/green]")
             return
         try:
             set_clipboard(text)

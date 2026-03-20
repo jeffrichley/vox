@@ -70,6 +70,25 @@ class TestValidateConfig:
 
         # Assert - no exception
 
+    def test_valid_injection_mode_type_passes(self) -> None:
+        """Direct typing mode is accepted when configured explicitly."""
+        # Arrange - config with type injection
+
+        # Act - validate
+        vox_config.validate_config({"hotkey": "x", "injection_mode": "type"})
+
+        # Assert - no exception
+
+    def test_invalid_injection_mode_raises(self) -> None:
+        """Unknown injection modes fail with a field-specific error."""
+        # Arrange - unsupported injection mode
+
+        # Act - validate config with unsupported injection mode
+
+        # Assert - validation fails with injection_mode in message
+        with pytest.raises(ValueError, match="injection_mode"):
+            vox_config.validate_config({"hotkey": "x", "injection_mode": "paste"})
+
 
 @pytest.mark.unit
 class TestConfigPaths:
@@ -161,7 +180,7 @@ class TestApplyDeviceIdEnv:
     def test_apply_device_id_env_sets_string_when_vox_device_id_not_int(self) -> None:
         """When VOX_DEVICE_ID is not an int string, raw['device_id'] is still set (string)."""
         # Arrange - env has non-int VOX_DEVICE_ID
-        raw = {}
+        raw: dict[str, object] = {}
         with mock.patch.dict(os.environ, {"VOX_DEVICE_ID": "default"}, clear=False):
             # Act - apply env overrides
             vox_config._apply_device_id_env(raw)
@@ -353,3 +372,16 @@ class TestGetConfig:
         assert out["compute_type"] == "float32"
         assert out["compute_device"] == "cpu"
         assert out["injection_mode"] == "clipboard"
+
+    def test_returns_explicit_type_injection_mode(self) -> None:
+        """get_config preserves the direct typing injection mode."""
+        # Arrange - config provides type injection
+        with mock.patch.object(
+            vox_config,
+            "load_config",
+            return_value={"hotkey": "ctrl+space", "injection_mode": "type"},
+        ):
+            # Act - read config
+            out = vox_config.get_config()
+        # Assert - injection mode is preserved
+        assert out["injection_mode"] == "type"

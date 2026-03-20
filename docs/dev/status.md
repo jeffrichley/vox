@@ -1,15 +1,17 @@
 ---
-last_updated: 2026-03-17
+last_updated: 2026-03-20
 ---
 
 # Dev status
 
 ## Current focus
 
-- **002-tray-packaging-ux:** Publish first release (merge release-please PR or create release) then verify `uvx vox-core --help` / `uvx vox-core devices` from non-repo dir; validate Phase 4 binaries on release per `.ai/PLANS/002-tray-packaging-ux.md`.
+- **Repo hygiene:** Keep plan/status surfaces aligned with shipped behavior and close small runtime gaps such as explicit direct typing injection mode support.
 
 ## Recently completed
 
+- **Direct typing injection mode:** `injection_mode = "type"` now types transcription into the focused window without modifying the clipboard; config/docs/tests updated.
+- **002 Phase 3 (release automation and publish verification):** release-please, PyPI Trusted Publisher publish flow, and non-repo `uvx vox-core` verification are complete.
 - **002 Phase 4 (PyInstaller release assets):** `build-release-assets.yml` (release: published, matrix win/mac/linux, smoke test, upload); README “Pre-built binaries (GitHub Releases)”; package name set to vox-core for PyPI.
 - **002 Phase 3 (PyPI packaging):** Classifiers, `[project.urls]`, `license` in pyproject.toml; README Install with `uvx vox-core` and `pip install vox-core`; release-please + publish-pypi workflow; PyPI project vox-core + Trusted Publisher; `uv build` produces wheel and sdist.
 - **002 Phase 2 (system tray):** Tray icon (pystray + Pillow) with Quit menu; `use_tray` in config and `VOX_TRAY=1` env; icon from `media/vox_icon.png` in package; `just test-quality` passing.
@@ -20,6 +22,7 @@ last_updated: 2026-03-17
 
 ## Diary
 
+- **2026-03-20:** Added explicit `injection_mode = "type"` support so Vox can type directly into the focused window without overwriting the clipboard. Updated README, example config, tests, and plan/status tracking. Also synced status with completed release-please/PyPI/`uvx vox-core` verification.
 - **2026-03-17:** Status sync. Current focus: publish release + verify uvx vox-core; Phase 4 workflow/README done; package name vox-core. Recently completed updated for Phase 4 and vox-core.
 - **2026-03-17:** 002 Phase 3 executed. PyPI metadata (classifiers, urls, license); README Install and publish steps; `uv build` succeeded; package name vox-core.
 - **2026-03-17:** 002 Phase 2 executed. System tray with Quit; config `use_tray` and `VOX_TRAY=1`; `src/vox/gui/tray.py` and icon; `just test-quality` passed.
