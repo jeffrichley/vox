@@ -417,6 +417,19 @@ This mapping is the “no gaps” checklist. Each PRD MVP requirement must map t
 
 ## EXECUTION REPORT
 
+## Plan Patch
+
+### 2026-03-20: Follow-on repo hygiene for direct typing injection
+
+- Scope clarification: the PRD and plan describe optional paste/type injection into the focused window. The repository already includes `type_into_focused()` in `src/vox/inject/keystroke.py`, but runtime config currently exposes only `clipboard` and `clipboard_and_paste`.
+- Implementation intent: add an explicit `injection_mode = "type"` path that types the transcription directly into the focused window without modifying the clipboard.
+- Acceptance criteria for this patch:
+  - `src/vox/config.py` validates `injection_mode` against explicit allowed values including `"type"`.
+  - `src/vox/commands.py` dispatches `"type"` to `type_into_focused(text)` and does not call `set_clipboard(text)` for that mode.
+  - Unit tests cover config validation and runtime dispatch for `"type"`.
+  - `README.md` and `vox.toml.example` document the new mode and its clipboard behavior.
+  - Repo validation gates pass without relying on pre-existing lazy-import/type-annotation debt in `src/vox/capture/*`, `src/vox/cli.py`, or `src/vox/commands.py`.
+
 ### Phase 1: Foundation and capture — Completed 2026-03-17
 
 **Branch:** `feat/001-push-to-talk` (created from main).

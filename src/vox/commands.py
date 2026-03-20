@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
+from importlib import import_module
+from typing import Protocol, cast
 
 import numpy as np
 from rich.console import Console
@@ -11,8 +14,53 @@ from rich.table import Table
 
 from vox.capture import list_devices, play_back, record_seconds
 from vox.config import get_config, get_transcription_options
-from vox.inject import InjectError, paste_into_focused, set_clipboard
+from vox.inject import InjectError, paste_into_focused, set_clipboard, type_into_focused
 from vox.transcribe import TranscriptionError, load_model, transcribe
+
+
+class HotkeyModuleProtocol(Protocol):
+    """Minimal hotkey module protocol used by the runtime command layer."""
+
+    run_push_to_talk_loop: Callable[
+        [
+            str,
+            int | None,
+            int,
+            int,
+            Callable[[np.ndarray], None],
+            threading.Event | None,
+        ],
+        None,
+    ]
+
+
+def _run_push_to_talk_loop(  # noqa: PLR0913
+    hotkey_str: str,
+    device_id: int | None,
+    sample_rate: int,
+    channels: int,
+    on_audio: Callable[[np.ndarray], None],
+    stop_event: threading.Event | None = None,
+) -> None:
+    """Lazy-load and run the push-to-talk loop implementation.
+
+    Args:
+        hotkey_str: Global hotkey combination to register.
+        device_id: Optional audio input device ID.
+        sample_rate: Audio sample rate in Hz.
+        channels: Number of input channels to record.
+        on_audio: Callback invoked with each completed recording buffer.
+        stop_event: Optional signal used to stop the loop externally.
+    """
+    hotkey_module = cast(HotkeyModuleProtocol, import_module("vox.hotkey"))
+    hotkey_module.run_push_to_talk_loop(
+        hotkey_str,
+        device_id,
+        sample_rate,
+        channels,
+        on_audio,
+        stop_event,
+    )
 
 
 def handle_devices(console: Console) -> None:
@@ -88,8 +136,6 @@ def handle_run(
         console: Rich console for output.
         stop_event: If set, the push-to-talk loop exits (e.g. for CLI stop button).
     """
-    from vox.hotkey import run_push_to_talk_loop
-
     cfg = get_config()
     hotkey_str = cfg["hotkey"]
     device_id = cfg.get("device_id")
@@ -121,6 +167,14 @@ def handle_run(
         if not text.strip():
             console.print("[dim]No speech detected.[/dim]")
             return
+        if injection_mode == "type":
+            try:
+                type_into_focused(text)
+            except InjectError as e:
+                console.print(f"[red]Typing error:[/red] {e}")
+                return
+            console.print("[green]Injected.[/green]")
+            return
         try:
             set_clipboard(text)
         except InjectError as e:
@@ -141,7 +195,7 @@ def handle_run(
             title="Vox push-to-talk",
         )
     )
-    run_push_to_talk_loop(
+    _run_push_to_talk_loop(
         hotkey_str=hotkey_str,
         device_id=device_id,
         sample_rate=sample_rate,

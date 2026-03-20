@@ -51,7 +51,7 @@ cp vox.toml.example ~/.vox/vox.toml
 
 ## Commands
 
-- **`vox`** or **`vox run`** — Start push-to-talk. By default a small window with a **Stop** button appears; with `use_tray = true` in config (or `VOX_TRAY=1`), a system tray icon is shown instead—click the icon and choose **Quit** to stop. Press and hold your configured hotkey, speak, release; the audio is transcribed and placed on the clipboard (and optionally pasted into the focused window).
+- **`vox`** or **`vox run`** — Start push-to-talk. By default a small window with a **Stop** button appears; with `use_tray = true` in config (or `VOX_TRAY=1`), a system tray icon is shown instead—click the icon and choose **Quit** to stop. Press and hold your configured hotkey, speak, release; the audio is transcribed and then injected according to `injection_mode`: clipboard only, clipboard then paste, or direct typing into the focused window.
 - **`vox devices`** — List audio input devices (ID, name, host API). Use this to choose `device_id` in config.
 - **`vox test-mic [--device ID] [--seconds N]`** — Record for N seconds, play back the recording, then transcribe and print text. Default 2 seconds. Use to verify mic and model before using `vox`.
 
@@ -65,7 +65,7 @@ cp vox.toml.example ~/.vox/vox.toml
 ## OS permissions
 
 - **Microphone:** Required for capture. On Windows, allow app access to the microphone. On macOS, grant Microphone access when prompted.
-- **Accessibility / input injection:** Only needed if you use `injection_mode = "clipboard_and_paste"` (paste into focused window). On Windows, run the app with normal privileges; on macOS, grant Accessibility permission to Terminal (or the app running `vox run`) so it can simulate paste.
+- **Accessibility / input injection:** Needed if you use `injection_mode = "clipboard_and_paste"` or `injection_mode = "type"` (paste or type into the focused window). On Windows, run the app with normal privileges; on macOS, grant Accessibility permission to Terminal (or the app running `vox run`) so it can simulate input.
 
 ## Definition of Visible Done
 
@@ -75,7 +75,7 @@ A human can verify the MVP by:
 2. **Configure:** Copy `vox.toml.example` to `~/.vox/vox.toml`; set `hotkey` (e.g. `ctrl+shift+v`) and optionally `device_id`, `model_size`, `compute_type`, `injection_mode`.
 3. **Run:** Execute `uv run vox` or `vox` (or `vox run`). A small “Vox” window with a Stop button appears, or a tray icon if `use_tray` is enabled.
 4. **Trigger:** Focus any text field (or leave focus anywhere). Press and hold the configured hotkey, speak a short phrase, release the key.
-5. **Verify:** Paste from clipboard (Ctrl+V / Cmd+V) and see the transcribed phrase. If `injection_mode = "clipboard_and_paste"`, the text also appears in the focused field.
+5. **Verify:** If `injection_mode = "clipboard"` or `injection_mode = "clipboard_and_paste"`, paste from clipboard (Ctrl+V / Cmd+V) and see the transcribed phrase. If `injection_mode = "clipboard_and_paste"` or `injection_mode = "type"`, the text also appears in the focused field.
 6. **Stop:** Click Stop in the Vox window (or close the window) to exit.
 7. **Errors:** If mic or model is missing, a clear error message appears (no silent failure).
 

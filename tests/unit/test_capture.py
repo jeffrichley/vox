@@ -47,11 +47,10 @@ class TestListDevices:
     def test_list_devices_raises_runtime_error_on_port_audio_error(self) -> None:
         """When sounddevice raises PortAudioError, list_devices raises RuntimeError."""
         # Arrange - query_devices raises PortAudioError
+        mock_sd = mock.Mock()
+        mock_sd.query_devices.side_effect = sd.PortAudioError()
         with (
-            mock.patch(
-                "vox.capture.stream.sd.query_devices",
-                side_effect=sd.PortAudioError(),
-            ),
+            mock.patch("vox.capture.stream._sd", return_value=mock_sd),
             pytest.raises(RuntimeError, match=r"audio|device|permission"),
         ):
             # Act - call list_devices (expects RuntimeError)
@@ -70,7 +69,9 @@ class TestRecordUntilStop:
         stop_ev.set()
         mock_stream = mock.Mock()
 
-        with mock.patch("vox.capture.stream.sd.InputStream", return_value=mock_stream):
+        mock_sd = mock.Mock()
+        mock_sd.InputStream.return_value = mock_stream
+        with mock.patch("vox.capture.stream._sd", return_value=mock_sd):
             # Act - call record_until_stop with pre-set stop event
             result = record_until_stop(stop_ev, sample_rate=16000, channels=1)
             # Assert - stream started, then wait; no blocks so empty array
@@ -103,9 +104,9 @@ class TestRecordUntilStop:
             stream.start.side_effect = start_side_effect
             return stream
 
-        with mock.patch(
-            "vox.capture.stream.sd.InputStream", side_effect=capture_stream
-        ):
+        mock_sd = mock.Mock()
+        mock_sd.InputStream.side_effect = capture_stream
+        with mock.patch("vox.capture.stream._sd", return_value=mock_sd):
             # Act - call record_until_stop; callback will run once then stop_event set
             result = record_until_stop(stop_ev, sample_rate=16000, channels=1)
             # Assert - one block (2 frames, 1 channel)

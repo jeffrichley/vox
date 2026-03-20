@@ -137,7 +137,7 @@ class TestHandleRun:
         with (
             mock.patch("vox.commands.get_config") as mock_cfg,
             mock.patch("vox.commands.load_model"),
-            mock.patch("vox.commands.run_push_to_talk_loop") as mock_loop,
+            mock.patch("vox.commands._run_push_to_talk_loop") as mock_loop,
         ):
             mock_cfg.return_value = {
                 "hotkey": "ctrl+v",
@@ -170,7 +170,7 @@ class TestHandleRun:
         with (
             mock.patch("vox.commands.get_config") as mock_cfg,
             mock.patch("vox.commands.load_model"),
-            mock.patch("vox.commands.run_push_to_talk_loop", side_effect=capture_loop),
+            mock.patch("vox.commands._run_push_to_talk_loop", side_effect=capture_loop),
         ):
             mock_cfg.return_value = {
                 "hotkey": "ctrl+v",
@@ -211,7 +211,7 @@ class TestHandleRun:
         with (
             mock.patch("vox.commands.get_config") as mock_cfg,
             mock.patch("vox.commands.load_model"),
-            mock.patch("vox.commands.run_push_to_talk_loop", side_effect=capture_loop),
+            mock.patch("vox.commands._run_push_to_talk_loop", side_effect=capture_loop),
         ):
             mock_cfg.return_value = {
                 "hotkey": "ctrl+v",
@@ -253,7 +253,7 @@ class TestHandleRun:
         with (
             mock.patch("vox.commands.get_config") as mock_cfg,
             mock.patch("vox.commands.load_model"),
-            mock.patch("vox.commands.run_push_to_talk_loop", side_effect=capture_loop),
+            mock.patch("vox.commands._run_push_to_talk_loop", side_effect=capture_loop),
         ):
             mock_cfg.return_value = {
                 "hotkey": "ctrl+v",
@@ -290,7 +290,7 @@ class TestHandleRun:
         with (
             mock.patch("vox.commands.get_config") as mock_cfg,
             mock.patch("vox.commands.load_model"),
-            mock.patch("vox.commands.run_push_to_talk_loop", side_effect=capture_loop),
+            mock.patch("vox.commands._run_push_to_talk_loop", side_effect=capture_loop),
         ):
             mock_cfg.return_value = {
                 "hotkey": "ctrl+v",
@@ -333,7 +333,7 @@ class TestHandleRun:
         with (
             mock.patch("vox.commands.get_config") as mock_cfg,
             mock.patch("vox.commands.load_model"),
-            mock.patch("vox.commands.run_push_to_talk_loop", side_effect=capture_loop),
+            mock.patch("vox.commands._run_push_to_talk_loop", side_effect=capture_loop),
         ):
             mock_cfg.return_value = {
                 "hotkey": "ctrl+v",
@@ -365,3 +365,91 @@ class TestHandleRun:
             "Paste failed" in c or "paste" in c.lower() or "yellow" in c for c in calls
         )
         assert any("Injected" in c for c in calls)
+
+    def test_on_audio_types_directly_without_touching_clipboard(self) -> None:
+        """When injection_mode is type, the text is typed directly and clipboard is skipped."""
+        # Arrange - mock console and capture on_audio with direct typing mode
+        mock_console = mock.Mock()
+        stop_ev = threading.Event()
+        stop_ev.set()
+        on_audio_captured: list = []
+
+        def capture_loop(**kwargs: object) -> None:
+            on_audio_captured.append(kwargs.get("on_audio"))
+
+        with (
+            mock.patch("vox.commands.get_config") as mock_cfg,
+            mock.patch("vox.commands.load_model"),
+            mock.patch("vox.commands._run_push_to_talk_loop", side_effect=capture_loop),
+        ):
+            mock_cfg.return_value = {
+                "hotkey": "ctrl+v",
+                "device_id": None,
+                "model_size": "base",
+                "compute_type": "float32",
+                "compute_device": "cpu",
+                "injection_mode": "type",
+            }
+            handle_run(mock_console, stop_event=stop_ev)
+
+        on_audio = on_audio_captured[0]
+        assert on_audio is not None
+
+        # Act - invoke on_audio while direct typing succeeds
+        with (
+            mock.patch("vox.commands.transcribe", return_value="hello"),
+            mock.patch("vox.commands.type_into_focused") as mock_type,
+            mock.patch("vox.commands.set_clipboard") as mock_set_clipboard,
+        ):
+            on_audio(np.zeros(1600, dtype=np.float32))
+
+        # Assert - direct typing used and clipboard skipped
+        mock_type.assert_called_once_with("hello")
+        mock_set_clipboard.assert_not_called()
+        calls = [str(c) for c in mock_console.print.call_args_list]
+        assert any("Injected" in c for c in calls)
+
+    def test_on_audio_prints_typing_error_when_direct_typing_fails(self) -> None:
+        """When injection_mode is type and typing fails, an actionable error is printed."""
+        # Arrange - mock console and capture on_audio with direct typing mode
+        mock_console = mock.Mock()
+        stop_ev = threading.Event()
+        stop_ev.set()
+        on_audio_captured: list = []
+
+        def capture_loop(**kwargs: object) -> None:
+            on_audio_captured.append(kwargs.get("on_audio"))
+
+        with (
+            mock.patch("vox.commands.get_config") as mock_cfg,
+            mock.patch("vox.commands.load_model"),
+            mock.patch("vox.commands._run_push_to_talk_loop", side_effect=capture_loop),
+        ):
+            mock_cfg.return_value = {
+                "hotkey": "ctrl+v",
+                "device_id": None,
+                "model_size": "base",
+                "compute_type": "float32",
+                "compute_device": "cpu",
+                "injection_mode": "type",
+            }
+            handle_run(mock_console, stop_event=stop_ev)
+
+        on_audio = on_audio_captured[0]
+        assert on_audio is not None
+
+        # Act - invoke on_audio while direct typing fails
+        with (
+            mock.patch("vox.commands.transcribe", return_value="hello"),
+            mock.patch(
+                "vox.commands.type_into_focused",
+                side_effect=InjectError("access denied"),
+            ),
+            mock.patch("vox.commands.set_clipboard") as mock_set_clipboard,
+        ):
+            on_audio(np.zeros(1600, dtype=np.float32))
+
+        # Assert - typing error printed and clipboard still skipped
+        mock_set_clipboard.assert_not_called()
+        calls = [str(c) for c in mock_console.print.call_args_list]
+        assert any("Typing error" in c or "typing" in c.lower() for c in calls)

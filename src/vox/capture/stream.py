@@ -3,16 +3,66 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
+from importlib import import_module
+from typing import Protocol, cast
 
 import numpy as np
 
 
-def _sd():
+class InputStreamProtocol(Protocol):
+    """Minimal sounddevice input stream protocol used by this module."""
+
+    def start(self) -> None:
+        """Start the stream."""
+
+    def stop(self) -> None:
+        """Stop the stream."""
+
+    def close(self) -> None:
+        """Close the stream."""
+
+
+class SoundDeviceProtocol(Protocol):
+    """Minimal sounddevice module protocol used by this module."""
+
+    InputStream: Callable[..., InputStreamProtocol]
+    query_devices: Callable[[], list[dict[str, object]]]
+    query_hostapis: Callable[[int], dict[str, object]]
+    rec: Callable[..., np.ndarray]
+    wait: Callable[[], None]
+    play: Callable[..., None]
+
+
+def _sd() -> SoundDeviceProtocol:
+    """Return the lazily imported `sounddevice` module.
+
+    Returns:
+        The imported sounddevice module.
+    """
     # sounddevice loads PortAudio at import time; keep this lazy so `vox --help`
     # works on machines without PortAudio installed.
-    import sounddevice as sd  # type: ignore[import-untyped]
+    return cast(SoundDeviceProtocol, import_module("sounddevice"))
 
-    return sd
+
+def _int_or_default(value: object, default: int = 0) -> int:
+    """Return value as int when possible, otherwise default.
+
+    Args:
+        value: Candidate value from sounddevice metadata.
+        default: Fallback value when conversion is not possible.
+
+    Returns:
+        Integer value or the provided default.
+    """
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return default
+    return default
 
 
 def list_devices() -> list[tuple[int, str, str]]:
@@ -33,9 +83,10 @@ def list_devices() -> list[tuple[int, str, str]]:
         sd = _sd()
         devices = sd.query_devices()
         for i, dev in enumerate(devices):
-            if dev.get("max_input_channels", 0) > 0:
+            max_input_channels = _int_or_default(dev.get("max_input_channels", 0))
+            if max_input_channels > 0:
                 name = dev.get("name", "Unknown")
-                hostapi_idx = dev.get("hostapi", 0)
+                hostapi_idx = _int_or_default(dev.get("hostapi", 0))
                 hostapi_info = sd.query_hostapis(hostapi_idx)
                 hostapi_name = hostapi_info.get("name", "?")
                 result.append((i, str(name), str(hostapi_name)))

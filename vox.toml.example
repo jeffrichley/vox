@@ -26,4 +26,5 @@ compute_device = "cpu"
 # Optional: how to inject transcribed text.
 # - "clipboard": only set clipboard (default).
 # - "clipboard_and_paste": set clipboard and paste into focused window (needs accessibility permission).
+# - "type": type directly into the focused window without modifying the clipboard (needs accessibility permission).
 injection_mode = "clipboard"

@@ -20,9 +20,9 @@ class TestDevicesCommand:
     def test_devices_exits_1_when_handle_devices_raises_runtime_error(self) -> None:
         """When handle_devices raises RuntimeError, devices exits 1."""
         # Arrange - handle_devices raises RuntimeError
-        with mock.patch(
-            "vox.cli.handle_devices", side_effect=RuntimeError("no audio devices")
-        ):
+        mock_commands = mock.Mock()
+        mock_commands.handle_devices.side_effect = RuntimeError("no audio devices")
+        with mock.patch("vox.cli._commands_module", return_value=mock_commands):
             # Act - call devices (will raise Exit)
             # Assert - Exit(1)
             with pytest.raises(typer.Exit) as exc_info:
@@ -32,11 +32,11 @@ class TestDevicesCommand:
     def test_devices_exits_1_and_prints_error_on_runtime_error(self) -> None:
         """When handle_devices raises RuntimeError, console.print is called with Error."""
         # Arrange - mock console and handle_devices raises
+        mock_commands = mock.Mock()
+        mock_commands.handle_devices.side_effect = RuntimeError("no devices")
         with (
             mock.patch("vox.cli.console") as mock_console,
-            mock.patch(
-                "vox.cli.handle_devices", side_effect=RuntimeError("no devices")
-            ),
+            mock.patch("vox.cli._commands_module", return_value=mock_commands),
         ):
             # Act - call devices
             with pytest.raises(typer.Exit):
@@ -55,10 +55,11 @@ class TestTestMicCommand:
     def test_test_mic_exits_1_when_handle_test_mic_raises_value_error(self) -> None:
         """When handle_test_mic raises ValueError (e.g. seconds<=0), test_mic exits 1."""
         # Arrange - handle_test_mic raises ValueError
-        with mock.patch(
-            "vox.cli.handle_test_mic",
-            side_effect=ValueError("seconds must be positive"),
-        ):
+        mock_commands = mock.Mock()
+        mock_commands.handle_test_mic.side_effect = ValueError(
+            "seconds must be positive"
+        )
+        with mock.patch("vox.cli._commands_module", return_value=mock_commands):
             # Act - call test_mic command
             with pytest.raises(typer.Exit) as exc_info:
                 cli_test_mic(device=None, seconds=1.0)
@@ -68,9 +69,9 @@ class TestTestMicCommand:
     def test_test_mic_exits_1_when_handle_test_mic_raises_config_error(self) -> None:
         """When handle_test_mic raises ConfigError, test_mic exits 1."""
         # Arrange - patch handle_test_mic to raise ConfigError
-        with mock.patch(
-            "vox.cli.handle_test_mic", side_effect=ConfigError("bad config")
-        ):
+        mock_commands = mock.Mock()
+        mock_commands.handle_test_mic.side_effect = ConfigError("bad config")
+        with mock.patch("vox.cli._commands_module", return_value=mock_commands):
             # Act - call test_mic command
             with pytest.raises(typer.Exit) as exc_info:
                 cli_test_mic(device=None, seconds=1.0)
@@ -82,10 +83,11 @@ class TestTestMicCommand:
     ) -> None:
         """When handle_test_mic raises TranscriptionError, test_mic exits 1."""
         # Arrange - handle_test_mic raises TranscriptionError
-        with mock.patch(
-            "vox.cli.handle_test_mic",
-            side_effect=TranscriptionError("model not found"),
-        ):
+        mock_commands = mock.Mock()
+        mock_commands.handle_test_mic.side_effect = TranscriptionError(
+            "model not found"
+        )
+        with mock.patch("vox.cli._commands_module", return_value=mock_commands):
             # Act - call test_mic command
             with pytest.raises(typer.Exit) as exc_info:
                 cli_test_mic(device=None, seconds=1.0)
@@ -95,9 +97,9 @@ class TestTestMicCommand:
     def test_test_mic_exits_1_when_handle_test_mic_raises_runtime_error(self) -> None:
         """When handle_test_mic raises RuntimeError, test_mic exits 1."""
         # Arrange - handle_test_mic raises RuntimeError
-        with mock.patch(
-            "vox.cli.handle_test_mic", side_effect=RuntimeError("audio failed")
-        ):
+        mock_commands = mock.Mock()
+        mock_commands.handle_test_mic.side_effect = RuntimeError("audio failed")
+        with mock.patch("vox.cli._commands_module", return_value=mock_commands):
             # Act - call test_mic command
             with pytest.raises(typer.Exit) as exc_info:
                 cli_test_mic(device=None, seconds=1.0)
@@ -107,12 +109,13 @@ class TestTestMicCommand:
     def test_test_mic_prints_error_message_on_failure(self) -> None:
         """When handle_test_mic raises, console.print is called with error."""
         # Arrange - mock console and handle_test_mic raising ValueError
+        mock_commands = mock.Mock()
+        mock_commands.handle_test_mic.side_effect = ValueError(
+            "seconds must be positive"
+        )
         with (
             mock.patch("vox.cli.console") as mock_console,
-            mock.patch(
-                "vox.cli.handle_test_mic",
-                side_effect=ValueError("seconds must be positive"),
-            ),
+            mock.patch("vox.cli._commands_module", return_value=mock_commands),
         ):
             # Act - call test_mic command
             with pytest.raises(typer.Exit):
@@ -132,9 +135,13 @@ class TestRunCommand:
         """When run_stop_window returns a ConfigError, run prints and exits 1."""
         # Arrange - use stop-window path (not tray) and run_stop_window returns ConfigError
         cause = ConfigError("missing hotkey")
+        mock_run_stop_window = mock.Mock(return_value=cause)
         with (
             mock.patch("vox.cli.get_config", return_value={"use_tray": False}),
-            mock.patch("vox.cli.run_stop_window", return_value=cause),
+            mock.patch(
+                "vox.cli._gui_runners",
+                return_value=(mock_run_stop_window, mock.Mock()),
+            ),
         ):
             # Act - call run (will raise Exit)
             # Assert - Exit(1) raised
@@ -146,9 +153,13 @@ class TestRunCommand:
         """When run_stop_window returns a TranscriptionError, run prints and exits 1."""
         # Arrange - use stop-window path and run_stop_window returns TranscriptionError
         cause = TranscriptionError("model not found")
+        mock_run_stop_window = mock.Mock(return_value=cause)
         with (
             mock.patch("vox.cli.get_config", return_value={"use_tray": False}),
-            mock.patch("vox.cli.run_stop_window", return_value=cause),
+            mock.patch(
+                "vox.cli._gui_runners",
+                return_value=(mock_run_stop_window, mock.Mock()),
+            ),
         ):
             # Act - call run (will raise Exit)
             # Assert - Exit(1) raised
@@ -160,9 +171,13 @@ class TestRunCommand:
         """When run_stop_window returns another exception, run exits 1."""
         # Arrange - use stop-window path and run_stop_window returns RuntimeError
         cause = RuntimeError("other")
+        mock_run_stop_window = mock.Mock(return_value=cause)
         with (
             mock.patch("vox.cli.get_config", return_value={"use_tray": False}),
-            mock.patch("vox.cli.run_stop_window", return_value=cause),
+            mock.patch(
+                "vox.cli._gui_runners",
+                return_value=(mock_run_stop_window, mock.Mock()),
+            ),
         ):
             # Act - call run (will raise Exit)
             # Assert - Exit(1) raised
@@ -174,10 +189,14 @@ class TestRunCommand:
         """When run_stop_window returns ConfigError, run prints Config error and exits 1."""
         # Arrange - use stop-window path and run_stop_window returns ConfigError
         cause = ConfigError("missing hotkey")
+        mock_run_stop_window = mock.Mock(return_value=cause)
         with (
             mock.patch("vox.cli.get_config", return_value={"use_tray": False}),
             mock.patch("vox.cli.console") as mock_console,
-            mock.patch("vox.cli.run_stop_window", return_value=cause),
+            mock.patch(
+                "vox.cli._gui_runners",
+                return_value=(mock_run_stop_window, mock.Mock()),
+            ),
         ):
             # Act - call run (will raise Exit)
             with pytest.raises(typer.Exit):
@@ -190,10 +209,14 @@ class TestRunCommand:
         """When run_stop_window returns TranscriptionError, run prints Model error, exits 1."""
         # Arrange - use stop-window path and run_stop_window returns TranscriptionError
         cause = TranscriptionError("model not found")
+        mock_run_stop_window = mock.Mock(return_value=cause)
         with (
             mock.patch("vox.cli.get_config", return_value={"use_tray": False}),
             mock.patch("vox.cli.console") as mock_console,
-            mock.patch("vox.cli.run_stop_window", return_value=cause),
+            mock.patch(
+                "vox.cli._gui_runners",
+                return_value=(mock_run_stop_window, mock.Mock()),
+            ),
         ):
             # Act - call run (will raise Exit)
             with pytest.raises(typer.Exit):
@@ -206,10 +229,14 @@ class TestRunCommand:
         """When run_stop_window returns other exception, run prints Error and exits 1."""
         # Arrange - use stop-window path and run_stop_window returns RuntimeError
         cause = RuntimeError("other")
+        mock_run_stop_window = mock.Mock(return_value=cause)
         with (
             mock.patch("vox.cli.get_config", return_value={"use_tray": False}),
             mock.patch("vox.cli.console") as mock_console,
-            mock.patch("vox.cli.run_stop_window", return_value=cause),
+            mock.patch(
+                "vox.cli._gui_runners",
+                return_value=(mock_run_stop_window, mock.Mock()),
+            ),
         ):
             # Act - call run (will raise Exit)
             with pytest.raises(typer.Exit):

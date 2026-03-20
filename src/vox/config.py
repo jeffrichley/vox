@@ -52,6 +52,14 @@ ALLOWED_COMPUTE_TYPES: frozenset[str] = frozenset(
     }
 )
 
+ALLOWED_INJECTION_MODES: frozenset[str] = frozenset(
+    {
+        "clipboard",
+        "clipboard_and_paste",
+        "type",
+    }
+)
+
 
 def _is_model_path(s: str) -> bool:
     """True if s looks like a path (separator or ~).
@@ -260,6 +268,28 @@ def _validate_optional_str(raw: dict[str, Any], key: str) -> None:
         raise ValueError(f"{key}: must be a non-empty string")
 
 
+def _validate_injection_mode(raw: dict[str, Any]) -> None:
+    """Raise if injection_mode is present and not one of the allowed values.
+
+    Args:
+        raw: Config dict to validate.
+
+    Raises:
+        ValueError: If injection_mode is present and invalid.
+    """
+    if "injection_mode" not in raw or raw["injection_mode"] is None:
+        return
+    value = raw["injection_mode"]
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("injection_mode: must be a non-empty string")
+    normalized = value.strip()
+    if normalized not in ALLOWED_INJECTION_MODES:
+        raise ValueError(
+            "injection_mode: must be one of "
+            f"{sorted(ALLOWED_INJECTION_MODES)}; got {normalized!r}"
+        )
+
+
 def _validate_hotkey(raw: dict[str, Any]) -> None:
     """Raise if hotkey is missing or not a non-empty string.
 
@@ -341,7 +371,7 @@ def validate_config(raw: dict[str, Any]) -> None:
         _validate_optional_str(raw, "model_size")
         _validate_optional_str(raw, "compute_type")
         _validate_optional_str(raw, "compute_device")
-        _validate_optional_str(raw, "injection_mode")
+        _validate_injection_mode(raw)
     except ValueError as e:
         raise ConfigError(str(e)) from e
 
