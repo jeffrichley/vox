@@ -14,6 +14,9 @@ from vox.hotkey.register import (
     _key_matches,
     _normalize_modifier,
     _parse_hotkey,
+    _PushToTalkSession,
+    _RecordingConfig,
+    _RecordingHooks,
     run_push_to_talk_loop,
 )
 
@@ -63,6 +66,69 @@ class TestRunPushToTalkLoop:
             assert len(result) == 1
             mock_listener.stop.assert_called_once()
             on_audio.assert_not_called()
+
+    def test_push_to_talk_session_triggers_start_then_stop_callbacks_in_order(
+        self,
+    ) -> None:
+        """Valid press/release fires cue callbacks around record start/stop in order."""
+        # Arrange - track callback ordering without using a real listener thread
+        events: list[str] = []
+        mock_thread = mock.Mock()
+        mock_thread.start.side_effect = lambda: events.append("thread-start")
+        session = _PushToTalkSession(
+            recording_config=_RecordingConfig(
+                hotkey_str="ctrl+v",
+                device_id=None,
+                sample_rate=16_000,
+                channels=1,
+            ),
+            on_audio=mock.Mock(),
+            recording_hooks=_RecordingHooks(
+                on_start=lambda: events.append("start"),
+                on_stop=lambda: events.append(
+                    f"stop:{session.stop_event is not None and session.stop_event.is_set()}"
+                ),
+            ),
+        )
+        session.queue.put = lambda _item: events.append("queued")  # type: ignore[method-assign]
+
+        with mock.patch(
+            "vox.hotkey.register.threading.Thread", return_value=mock_thread
+        ):
+            # Act - press ctrl, then trigger key, then release trigger key
+            session._on_press(keyboard.Key.ctrl_l)
+            session._on_press(keyboard.KeyCode.from_char("v"))
+            session._on_release(keyboard.KeyCode.from_char("v"))
+
+        # Assert - cue callbacks wrapped the record lifecycle in the intended order
+        assert events == ["start", "thread-start", "stop:True", "queued"]
+
+    def test_push_to_talk_session_does_not_trigger_cues_for_unrelated_keys(
+        self,
+    ) -> None:
+        """Unrelated key presses/releases do not trigger start or stop callbacks."""
+        # Arrange - session with cue callbacks and mocked record thread
+        on_start = mock.Mock()
+        on_stop = mock.Mock()
+        session = _PushToTalkSession(
+            recording_config=_RecordingConfig(
+                hotkey_str="ctrl+v",
+                device_id=None,
+                sample_rate=16_000,
+                channels=1,
+            ),
+            on_audio=mock.Mock(),
+            recording_hooks=_RecordingHooks(on_start=on_start, on_stop=on_stop),
+        )
+
+        with mock.patch("vox.hotkey.register.threading.Thread"):
+            # Act - use unrelated non-hotkey keys
+            session._on_press(keyboard.KeyCode.from_char("x"))
+            session._on_release(keyboard.KeyCode.from_char("x"))
+
+        # Assert - no cue callback fired
+        on_start.assert_not_called()
+        on_stop.assert_not_called()
 
 
 @pytest.mark.unit

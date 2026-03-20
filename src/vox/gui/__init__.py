@@ -5,7 +5,8 @@ This package is omitted from test coverage by design; see ``vox.gui.stop_window`
 module docstring for rationale.
 """
 
+from vox.gui.settings_window import run_settings_window
 from vox.gui.stop_window import run_stop_window
 from vox.gui.tray import run_tray
 
-__all__ = ["run_stop_window", "run_tray"]
+__all__ = ["run_settings_window", "run_stop_window", "run_tray"]

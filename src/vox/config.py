@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import os
+import tempfile
 
 # Use tomllib (stdlib in Python 3.11+) for reading TOML
 import tomllib
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -194,6 +197,21 @@ def _apply_use_tray_env(raw: dict[str, Any]) -> None:
     raw["use_tray"] = v in ("1", "true", "yes")
 
 
+def _apply_cue_volume_env(raw: dict[str, Any]) -> None:
+    """Set raw['cue_volume'] from VOX_CUE_VOLUME if set.
+
+    Args:
+        raw: Config dict to update in place.
+    """
+    if "VOX_CUE_VOLUME" not in os.environ:
+        return
+    value = os.environ["VOX_CUE_VOLUME"].strip()
+    try:
+        raw["cue_volume"] = float(value)
+    except ValueError:
+        raw["cue_volume"] = value
+
+
 def _apply_env_overrides(raw: dict[str, Any]) -> None:
     """Mutate raw with env overrides (VOX_*).
 
@@ -205,6 +223,7 @@ def _apply_env_overrides(raw: dict[str, Any]) -> None:
             raw[key] = os.environ[env_key].strip() if strip else os.environ[env_key]
     _apply_device_id_env(raw)
     _apply_use_tray_env(raw)
+    _apply_cue_volume_env(raw)
 
 
 _CONFIG_KEYS = (
@@ -214,8 +233,20 @@ _CONFIG_KEYS = (
     "compute_type",
     "compute_device",
     "injection_mode",
+    "cue_volume",
     "use_tray",
 )
+
+type TomlScalar = str | int | float | bool
+
+
+def get_persisted_config_path() -> Path:
+    """Return the writable config path for disk-backed user settings.
+
+    Returns:
+        The config path that disk-backed edits should write to.
+    """
+    return _get_config_paths()[0]
 
 
 def _merge_toml_into(data: dict[str, Any], raw: dict[str, Any]) -> None:
@@ -230,6 +261,21 @@ def _merge_toml_into(data: dict[str, Any], raw: dict[str, Any]) -> None:
             raw[key] = data[key]
 
 
+def load_persisted_config() -> dict[str, Any]:
+    """Load the editable file-backed config without applying env overrides.
+
+    Returns:
+        The persisted config values loaded from TOML only.
+    """
+    raw: dict[str, Any] = {}
+    for path in _get_config_paths():
+        data = _load_toml(path)
+        if data:
+            _merge_toml_into(data, raw)
+            break
+    return raw
+
+
 def load_config() -> dict[str, Any]:
     """Load config from first found vox.toml then apply env overrides.
 
@@ -240,12 +286,7 @@ def load_config() -> dict[str, Any]:
     Returns:
         Flat dict of config keys; no defaults for required fields.
     """
-    raw: dict[str, Any] = {}
-    for p in _get_config_paths():
-        data = _load_toml(p)
-        if data:
-            _merge_toml_into(data, raw)
-            break
+    raw = load_persisted_config()
     _apply_env_overrides(raw)
     return raw
 
@@ -350,6 +391,26 @@ def _validate_use_tray(raw: dict[str, Any]) -> None:
     raise ValueError("use_tray: must be true or false")
 
 
+def _validate_cue_volume(raw: dict[str, Any]) -> None:
+    """Raise if cue_volume is present and not a float between 0.0 and 1.0.
+
+    Args:
+        raw: Config dict to validate.
+
+    Raises:
+        ValueError: If cue_volume is present and invalid.
+    """
+    if "cue_volume" not in raw or raw["cue_volume"] is None:
+        return
+    value = raw["cue_volume"]
+    if isinstance(value, int | float):
+        cue_volume = float(value)
+    else:
+        raise ValueError("cue_volume: must be a number between 0.0 and 1.0")
+    if not 0.0 <= cue_volume <= 1.0:
+        raise ValueError("cue_volume: must be between 0.0 and 1.0")
+
+
 def validate_config(raw: dict[str, Any]) -> None:
     """Validate required and optional fields; raise ValueError with field name.
 
@@ -372,8 +433,50 @@ def validate_config(raw: dict[str, Any]) -> None:
         _validate_optional_str(raw, "compute_type")
         _validate_optional_str(raw, "compute_device")
         _validate_injection_mode(raw)
+        _validate_cue_volume(raw)
     except ValueError as e:
         raise ConfigError(str(e)) from e
+
+
+def _validate_transcription_settings(raw: dict[str, Any]) -> None:
+    """Validate transcription fields against the runtime schema.
+
+    Args:
+        raw: Config dict to validate.
+
+    Raises:
+        ConfigError: If the transcription fields are invalid.
+    """
+    try:
+        TranscriptionOptions(
+            model_size=_raw_transcription_options(raw)["model_size"],
+            compute_type=cast(
+                Literal["float32", "float16", "int8", "int8_float16"],
+                _raw_transcription_options(raw)["compute_type"],
+            ),
+            compute_device=cast(
+                Literal["cpu", "cuda"],
+                _raw_transcription_options(raw)["compute_device"],
+            ),
+        )
+    except ValidationError as e:
+        errors = e.errors()
+        if errors:
+            error = errors[0]
+            field = ".".join(str(part) for part in error.get("loc", ()))
+            detail = error.get("msg", "invalid value")
+            raise ConfigError(f"{field}: {detail}") from e
+        raise ConfigError(str(e)) from e
+
+
+def validate_persisted_config(raw: dict[str, Any]) -> None:
+    """Validate config that will be persisted to disk.
+
+    Args:
+        raw: Config dict that will be written to disk.
+    """
+    validate_config(raw)
+    _validate_transcription_settings(raw)
 
 
 def _raw_transcription_options(raw: dict[str, Any]) -> dict[str, str]:
@@ -457,12 +560,159 @@ def _str_default(raw: dict[str, Any], key: str, default: str) -> str:
     return (v or default).strip() if isinstance(v, str) else default
 
 
+def _float_default(raw: dict[str, Any], key: str, default: float) -> float:
+    """Get key from raw as float or return default.
+
+    Args:
+        raw: Config dict.
+        key: Key to look up.
+        default: Value if key missing or None.
+
+    Returns:
+        Float value or default.
+    """
+    value = raw.get(key)
+    if isinstance(value, int | float):
+        return float(value)
+    return default
+
+
+def _serialize_toml_value(value: TomlScalar) -> str:
+    """Serialize a supported flat config value to TOML.
+
+    Args:
+        value: One supported scalar config value.
+
+    Returns:
+        TOML-formatted scalar text.
+
+    Raises:
+        ConfigError: If the value type is unsupported for TOML serialization.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return repr(value)
+    if isinstance(value, str):
+        return json.dumps(value)
+    raise ConfigError(f"unsupported config value type: {type(value).__name__}")
+
+
+def serialize_persisted_config(raw: Mapping[str, Any]) -> str:
+    """Serialize supported Vox config keys to deterministic TOML.
+
+    Args:
+        raw: Mapping of supported config keys to values.
+
+    Returns:
+        Deterministic TOML text for the supported Vox keys.
+    """
+    filtered = {
+        key: raw[key] for key in _CONFIG_KEYS if key in raw and raw[key] is not None
+    }
+    validate_persisted_config(dict(filtered))
+    lines = [
+        f"{key} = {_serialize_toml_value(filtered[key])}"
+        for key in _CONFIG_KEYS
+        if key in filtered
+    ]
+    if not lines:
+        return ""
+    return "\n".join(lines) + "\n"
+
+
+def write_persisted_config(raw: Mapping[str, Any], path: Path | None = None) -> Path:
+    """Validate and atomically write supported config values to disk.
+
+    Args:
+        raw: Mapping of supported config keys to values.
+        path: Optional explicit config path to write instead of the default path.
+
+    Returns:
+        The config path that was written.
+
+    Raises:
+        ConfigError: If validation fails or the file cannot be written.
+    """
+    config_path = path or get_persisted_config_path()
+    serialized = serialize_persisted_config(raw)
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    fd, temp_path_str = tempfile.mkstemp(
+        prefix=f".{config_path.stem}-",
+        suffix=".tmp",
+        dir=str(config_path.parent),
+    )
+    temp_path = Path(temp_path_str)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(serialized)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, config_path)
+    except OSError as e:
+        temp_path.unlink(missing_ok=True)
+        raise ConfigError(
+            f"config write failed: {config_path}: {e.strerror or e}"
+        ) from e
+
+    return config_path
+
+
+def update_persisted_config(
+    updates: Mapping[str, Any],
+    *,
+    base: Mapping[str, Any] | None = None,
+    path: Path | None = None,
+) -> dict[str, Any]:
+    """Merge updates into the file-backed config, validate, and persist.
+
+    Args:
+        updates: Key/value updates to merge into the persisted config.
+        base: Optional base mapping to update instead of reloading from disk.
+        path: Optional explicit config path to write instead of the default path.
+
+    Returns:
+        The merged config dict after the write succeeds.
+    """
+    merged = dict(load_persisted_config() if base is None else base)
+    for key, value in updates.items():
+        if value is None:
+            merged.pop(key, None)
+        else:
+            merged[key] = value
+    write_persisted_config(merged, path=path)
+    return merged
+
+
+def get_env_override_fields() -> dict[str, str]:
+    """Return config keys currently overridden by environment variables.
+
+    Returns:
+        Mapping of config field name to overriding environment variable name.
+    """
+    overrides = {
+        config_key: env_key
+        for env_key, config_key, _strip in _ENV_OVERRIDES
+        if env_key in os.environ
+    }
+    if "VOX_DEVICE_ID" in os.environ:
+        overrides["device_id"] = "VOX_DEVICE_ID"
+    if "VOX_TRAY" in os.environ:
+        overrides["use_tray"] = "VOX_TRAY"
+    if "VOX_CUE_VOLUME" in os.environ:
+        overrides["cue_volume"] = "VOX_CUE_VOLUME"
+    return overrides
+
+
 def get_config() -> dict[str, Any]:
     """Load and validate config; return validated dict with required fields set.
 
     Returns:
         Dict with hotkey, device_id, model_size, compute_type, compute_device,
-        injection_mode.
+        injection_mode, cue_volume.
 
     Raises:
         ConfigError: When a required field is missing or invalid.
@@ -479,6 +729,7 @@ def get_config() -> dict[str, Any]:
         "compute_type": _str_default(raw, "compute_type", "float32"),
         "compute_device": _str_default(raw, "compute_device", "cpu"),
         "injection_mode": _str_default(raw, "injection_mode", "clipboard"),
+        "cue_volume": _float_default(raw, "cue_volume", 0.5),
         "use_tray": _bool_default(raw, "use_tray", False),
     }
     return out

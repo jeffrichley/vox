@@ -9,7 +9,7 @@ from unittest import mock
 import numpy as np
 import pytest
 
-from vox.commands import handle_devices, handle_run, handle_test_mic
+from vox.commands import CuePlaybackError, handle_devices, handle_run, handle_test_mic
 from vox.inject import InjectError
 from vox.transcribe import TranscriptionError
 
@@ -127,6 +127,45 @@ class TestHandleTestMic:
 @pytest.mark.unit
 class TestHandleRun:
     """handle_run loads config, model, and runs push-to-talk loop until stop_event."""
+
+    def test_handle_run_preloads_cues_before_hotkey_loop_handoff(self) -> None:
+        """Cue preload happens before handing off to the hotkey loop."""
+        # Arrange - record startup ordering and callback wiring
+        mock_console = mock.Mock()
+        stop_ev = threading.Event()
+        stop_ev.set()
+        call_order: list[str] = []
+        cue_player = mock.Mock()
+
+        def preload_cues() -> mock.Mock:
+            call_order.append("preload")
+            return cue_player
+
+        def capture_loop(**kwargs: object) -> None:
+            call_order.append("loop")
+            assert callable(kwargs.get("on_recording_start"))
+            assert callable(kwargs.get("on_recording_stop"))
+
+        with (
+            mock.patch("vox.commands.get_config") as mock_cfg,
+            mock.patch("vox.commands.load_model"),
+            mock.patch("vox.commands.preload_default_cues", side_effect=preload_cues),
+            mock.patch("vox.commands._run_push_to_talk_loop", side_effect=capture_loop),
+        ):
+            mock_cfg.return_value = {
+                "hotkey": "ctrl+v",
+                "device_id": None,
+                "model_size": "base",
+                "compute_type": "float32",
+                "compute_device": "cpu",
+                "injection_mode": "clipboard",
+            }
+
+            # Act - run startup orchestration
+            handle_run(mock_console, stop_event=stop_ev)
+
+        # Assert - preload ran before the hotkey loop handoff
+        assert call_order == ["preload", "loop"]
 
     def test_handle_run_exits_when_stop_event_set_immediately(self) -> None:
         """When stop_event is set right away, handle_run returns after printing panel."""
@@ -453,3 +492,89 @@ class TestHandleRun:
         mock_set_clipboard.assert_not_called()
         calls = [str(c) for c in mock_console.print.call_args_list]
         assert any("Typing error" in c or "typing" in c.lower() for c in calls)
+
+    def test_recording_cue_callbacks_print_warnings_when_playback_fails(self) -> None:
+        """Cue-playback failures degrade to warnings instead of aborting the runtime."""
+        # Arrange - capture the hotkey callbacks that handle_run passes through
+        mock_console = mock.Mock()
+        stop_ev = threading.Event()
+        stop_ev.set()
+        runtime_kwargs: dict[str, object] = {}
+        cue_player = mock.Mock()
+        cue_player.play_start.side_effect = CuePlaybackError("output down")
+        cue_player.play_end.side_effect = CuePlaybackError("output down")
+
+        def capture_loop(**kwargs: object) -> None:
+            runtime_kwargs.update(kwargs)
+
+        with (
+            mock.patch("vox.commands.get_config") as mock_cfg,
+            mock.patch("vox.commands.load_model"),
+            mock.patch("vox.commands.preload_default_cues", return_value=cue_player),
+            mock.patch("vox.commands._run_push_to_talk_loop", side_effect=capture_loop),
+        ):
+            mock_cfg.return_value = {
+                "hotkey": "ctrl+v",
+                "device_id": None,
+                "model_size": "base",
+                "compute_type": "float32",
+                "compute_device": "cpu",
+                "injection_mode": "clipboard",
+            }
+            handle_run(mock_console, stop_event=stop_ev)
+
+        on_recording_start = runtime_kwargs.get("on_recording_start")
+        on_recording_stop = runtime_kwargs.get("on_recording_stop")
+        assert callable(on_recording_start)
+        assert callable(on_recording_stop)
+
+        # Act - invoke both warning paths
+        on_recording_start()
+        on_recording_stop()
+
+        # Assert - warnings were printed, not raised
+        calls = [str(c) for c in mock_console.print.call_args_list]
+        assert any("Start cue warning" in c for c in calls)
+        assert any("End cue warning" in c for c in calls)
+
+    def test_recording_cue_callbacks_use_configured_volume(self) -> None:
+        """Cue callbacks pass the configured cue volume through to playback."""
+        # Arrange - capture the hotkey callbacks that handle_run passes through
+        mock_console = mock.Mock()
+        stop_ev = threading.Event()
+        stop_ev.set()
+        runtime_kwargs: dict[str, object] = {}
+        cue_player = mock.Mock()
+
+        def capture_loop(**kwargs: object) -> None:
+            runtime_kwargs.update(kwargs)
+
+        with (
+            mock.patch("vox.commands.get_config") as mock_cfg,
+            mock.patch("vox.commands.load_model"),
+            mock.patch("vox.commands.preload_default_cues", return_value=cue_player),
+            mock.patch("vox.commands._run_push_to_talk_loop", side_effect=capture_loop),
+        ):
+            mock_cfg.return_value = {
+                "hotkey": "ctrl+v",
+                "device_id": None,
+                "model_size": "base",
+                "compute_type": "float32",
+                "compute_device": "cpu",
+                "injection_mode": "clipboard",
+                "cue_volume": 0.25,
+            }
+            handle_run(mock_console, stop_event=stop_ev)
+
+        on_recording_start = runtime_kwargs.get("on_recording_start")
+        on_recording_stop = runtime_kwargs.get("on_recording_stop")
+        assert callable(on_recording_start)
+        assert callable(on_recording_stop)
+
+        # Act - invoke both cue callbacks
+        on_recording_start()
+        on_recording_stop()
+
+        # Assert - configured cue volume is forwarded to both playback calls
+        cue_player.play_start.assert_called_once_with(volume_scale=0.25)
+        cue_player.play_end.assert_called_once_with(volume_scale=0.25)

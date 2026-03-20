@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from queue import Queue
 
 import numpy as np
@@ -113,22 +114,48 @@ def _key_matches(
     return bool(key == trigger)
 
 
+@dataclass(frozen=True)
+class _RecordingHooks:
+    """Optional runtime hooks for recording start and stop events."""
+
+    on_start: Callable[[], None] | None = None
+    on_stop: Callable[[], None] | None = None
+
+
+@dataclass(frozen=True)
+class _RecordingConfig:
+    """Static runtime settings for one push-to-talk session."""
+
+    hotkey_str: str
+    device_id: int | None
+    sample_rate: int
+    channels: int
+
+
 class _PushToTalkSession:
     """Holds state and callbacks for one push-to-talk listener run."""
 
     def __init__(
         self,
-        hotkey_str: str,
-        device_id: int | None,
-        sample_rate: int,
-        channels: int,
+        recording_config: _RecordingConfig,
         on_audio: Callable[[np.ndarray], None],
+        recording_hooks: _RecordingHooks | None = None,
     ) -> None:
-        self.modifier_keys, self.trigger_key = _parse_hotkey(hotkey_str)
-        self.device_id = device_id
-        self.sample_rate = sample_rate
-        self.channels = channels
+        """Initialize one push-to-talk session with optional recording hooks.
+
+        Args:
+            recording_config: Static hotkey and capture settings for the session.
+            on_audio: Callback invoked with the completed recording buffer.
+            recording_hooks: Optional start/stop callbacks around recording.
+        """
+        self.modifier_keys, self.trigger_key = _parse_hotkey(
+            recording_config.hotkey_str
+        )
+        self.device_id = recording_config.device_id
+        self.sample_rate = recording_config.sample_rate
+        self.channels = recording_config.channels
         self.on_audio = on_audio
+        self.recording_hooks = recording_hooks or _RecordingHooks()
         self.current_modifiers: set[keyboard.Key] = set()
         self.recording_thread: threading.Thread | None = None
         self.stop_event: threading.Event | None = None
@@ -190,6 +217,8 @@ class _PushToTalkSession:
                 self.recording_thread = threading.Thread(
                     target=self._run_record, args=(holder,)
                 )
+                if self.recording_hooks.on_start is not None:
+                    self.recording_hooks.on_start()
                 self.recording_thread.start()
 
     def _on_release(self, key: keyboard.Key | keyboard.KeyCode | None) -> None:
@@ -209,6 +238,8 @@ class _PushToTalkSession:
             if self.recording_thread is None or self.stop_event is None:
                 return
             self.stop_event.set()
+            if self.recording_hooks.on_stop is not None:
+                self.recording_hooks.on_stop()
             self.queue.put((self.recording_thread, self.result_holder))
             self.recording_thread = None
             self.stop_event = None
@@ -259,6 +290,8 @@ def run_push_to_talk_loop(  # noqa: PLR0913
     sample_rate: int,
     channels: int,
     on_audio: Callable[[np.ndarray], None],
+    on_recording_start: Callable[[], None] | None = None,
+    on_recording_stop: Callable[[], None] | None = None,
     stop_event: threading.Event | None = None,
 ) -> None:
     """Run push-to-talk: press hotkey to start recording, release to stop.
@@ -276,13 +309,21 @@ def run_push_to_talk_loop(  # noqa: PLR0913
         sample_rate: Sample rate in Hz (e.g. 16000).
         channels: Number of channels (1 for mono).
         on_audio: Called with the recorded buffer (numpy array) on each release.
+        on_recording_start: Optional callback invoked immediately before recording.
+        on_recording_stop: Optional callback invoked immediately after stop signal.
         stop_event: Optional event; when set, the listener is stopped and run returns.
     """
     session = _PushToTalkSession(
-        hotkey_str=hotkey_str,
-        device_id=device_id,
-        sample_rate=sample_rate,
-        channels=channels,
+        recording_config=_RecordingConfig(
+            hotkey_str=hotkey_str,
+            device_id=device_id,
+            sample_rate=sample_rate,
+            channels=channels,
+        ),
         on_audio=on_audio,
+        recording_hooks=_RecordingHooks(
+            on_start=on_recording_start,
+            on_stop=on_recording_stop,
+        ),
     )
     session.run(stop_event=stop_event)

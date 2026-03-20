@@ -39,6 +39,51 @@ from tkinter import ttk
 from rich.console import Console
 
 from vox.commands import handle_run
+from vox.gui.settings_launcher import launch_settings_from_runtime
+
+
+def _launch_settings(console: Console) -> bool:
+    """Launch settings from the stop-window surface.
+
+    Args:
+        console: Console used for user-visible launcher failures.
+
+    Returns:
+        True when launch succeeds; False when it fails and is reported.
+    """
+    return launch_settings_from_runtime(console)
+
+
+def _start_worker(
+    console: Console,
+    stop_event: threading.Event,
+    worker_done: threading.Event,
+    worker_error: list[BaseException],
+) -> threading.Thread:
+    """Start the push-to-talk worker thread and return it.
+
+    Args:
+        console: Console passed into the runtime worker.
+        stop_event: Event used to request worker shutdown.
+        worker_done: Event set when the worker exits.
+        worker_error: Shared error sink for worker exceptions.
+
+    Returns:
+        Started daemon worker thread.
+    """
+
+    def run_worker() -> None:
+        """Run handle_run in this thread; capture any exception for the caller."""
+        try:
+            handle_run(console, stop_event=stop_event)
+        except Exception as e:
+            worker_error.append(e)
+        finally:
+            worker_done.set()
+
+    thread = threading.Thread(target=run_worker, daemon=True)
+    thread.start()
+    return thread
 
 
 def run_stop_window(console: Console) -> BaseException | None:
@@ -62,19 +107,7 @@ def run_stop_window(console: Console) -> BaseException | None:
     stop_event = threading.Event()
     worker_done = threading.Event()
     worker_error: list[BaseException] = []
-
-    def run_worker() -> None:
-        """Run handle_run in this thread; capture any exception for the caller."""
-        try:
-            handle_run(console, stop_event=stop_event)
-        except Exception as e:
-            worker_error.append(e)
-        finally:
-            worker_done.set()
-
-    # Start push-to-talk in a background thread so the GUI can remain responsive.
-    thread = threading.Thread(target=run_worker, daemon=True)
-    thread.start()
+    thread = _start_worker(console, stop_event, worker_done, worker_error)
 
     # --- Tk window: title, size, single frame with label and Stop button ---
     root = tk.Tk()
@@ -100,6 +133,10 @@ def run_stop_window(console: Console) -> BaseException | None:
         stop_btn.state(["disabled"])
         root.after(100, _wait_then_close)
 
+    def _on_settings() -> None:
+        """Launch settings in a separate process so this window stays responsive."""
+        _launch_settings(console)
+
     def _check_worker_error() -> None:
         """If worker already exited with an error, close window immediately."""
         if worker_done.is_set() and worker_error:
@@ -107,8 +144,15 @@ def run_stop_window(console: Console) -> BaseException | None:
             return
         root.after(200, _check_worker_error)
 
-    stop_btn = ttk.Button(main, text="Stop", command=_on_stop)
-    stop_btn.pack(pady=4)
+    actions = ttk.Frame(main)
+    actions.pack(pady=4)
+
+    ttk.Button(actions, text="Settings", command=_on_settings).pack(
+        side=tk.LEFT,
+        padx=(0, 8),
+    )
+    stop_btn = ttk.Button(actions, text="Stop", command=_on_stop)
+    stop_btn.pack(side=tk.LEFT)
     root.protocol("WM_DELETE_WINDOW", _on_stop)
     root.after(200, _check_worker_error)
     root.mainloop()

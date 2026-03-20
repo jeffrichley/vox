@@ -89,6 +89,25 @@ class TestValidateConfig:
         with pytest.raises(ValueError, match="injection_mode"):
             vox_config.validate_config({"hotkey": "x", "injection_mode": "paste"})
 
+    def test_valid_cue_volume_passes(self) -> None:
+        """Cue volume accepts bounded numeric values."""
+        # Arrange - config with bounded cue volume
+
+        # Act - validate
+        vox_config.validate_config({"hotkey": "x", "cue_volume": 0.5})
+
+        # Assert - no exception
+
+    def test_invalid_cue_volume_raises(self) -> None:
+        """Out-of-range cue volume fails with a field-specific error."""
+        # Arrange - invalid cue volume
+
+        # Act - validate config with invalid cue volume
+
+        # Assert - validation fails with cue_volume in message
+        with pytest.raises(ValueError, match="cue_volume"):
+            vox_config.validate_config({"hotkey": "x", "cue_volume": 1.5})
+
 
 @pytest.mark.unit
 class TestConfigPaths:
@@ -232,6 +251,183 @@ class TestLoadConfig:
                 # Assert - env override applied to hotkey
                 assert out["hotkey"] == "alt+v"
 
+    def test_load_config_applies_cue_volume_env_override(self) -> None:
+        """VOX_CUE_VOLUME is parsed to float and overrides TOML."""
+        # Arrange - TOML plus cue-volume env override
+        with mock.patch.object(vox_config, "_get_config_paths") as mock_paths:
+            mock_paths.return_value = [vox_config.vox_user_dir() / "vox.toml"]
+            with (
+                mock.patch.object(
+                    vox_config,
+                    "_load_toml",
+                    return_value={"hotkey": "ctrl+space", "cue_volume": 1.0},
+                ),
+                mock.patch.dict(os.environ, {"VOX_CUE_VOLUME": "0.25"}, clear=False),
+            ):
+                # Act - call load_config
+                out = vox_config.load_config()
+
+        # Assert - env override applied to cue volume
+        assert out["cue_volume"] == 0.25
+
+
+@pytest.mark.unit
+class TestPersistedConfig:
+    """Editable config helpers should stay file-backed and deterministic."""
+
+    def test_get_persisted_config_path_prefers_vox_config_env(self) -> None:
+        """Writes should target VOX_CONFIG when it is set."""
+        # Arrange - set a custom config path in the environment
+        with mock.patch.dict(
+            os.environ,
+            {"VOX_CONFIG": "/custom/settings/vox.toml"},
+            clear=False,
+        ):
+            # Act - resolve the writable config path
+            out = vox_config.get_persisted_config_path()
+
+        # Assert - writes target the configured path
+        assert out == Path("/custom/settings/vox.toml")
+
+    def test_load_persisted_config_does_not_apply_env_overrides(self) -> None:
+        """Editable config should reflect TOML only, not effective runtime env values."""
+        # Arrange - TOML contains one value while env overrides specify others
+        with (
+            mock.patch.object(
+                vox_config,
+                "_get_config_paths",
+                return_value=[Path("/tmp/vox.toml")],
+            ),
+            mock.patch.object(
+                vox_config,
+                "_load_toml",
+                return_value={"hotkey": "ctrl+space", "cue_volume": 0.5},
+            ),
+            mock.patch.dict(
+                os.environ,
+                {"VOX_HOTKEY": "alt+v", "VOX_CUE_VOLUME": "0.25"},
+                clear=False,
+            ),
+        ):
+            # Act - load the file-backed editable config
+            out = vox_config.load_persisted_config()
+
+        # Assert - env overrides are not folded into the editable dict
+        assert out == {"hotkey": "ctrl+space", "cue_volume": 0.5}
+
+    def test_serialize_persisted_config_is_deterministic(self) -> None:
+        """Supported keys should be written in a stable order with TOML values."""
+        # Arrange - provide supported keys in a non-output order
+        serialized = vox_config.serialize_persisted_config(
+            {
+                "use_tray": True,
+                "hotkey": "ctrl+space",
+                "cue_volume": 0.25,
+                "model_size": "small",
+            }
+        )
+
+        # Act - serialization already executed above
+
+        # Assert - TOML output is ordered and deterministic
+        assert serialized == (
+            'hotkey = "ctrl+space"\n'
+            'model_size = "small"\n'
+            "cue_volume = 0.25\n"
+            "use_tray = true\n"
+        )
+
+    def test_write_persisted_config_uses_atomic_replace(self, tmp_path: Path) -> None:
+        """Config writes should go through a temp file and replace into place."""
+        # Arrange - capture replace calls while writing to a temp directory
+        config_path = tmp_path / "vox.toml"
+        replace_calls: list[tuple[Path, Path]] = []
+
+        def fake_replace(
+            src: str | os.PathLike[str], dst: str | os.PathLike[str]
+        ) -> None:
+            src_path = Path(src)
+            dst_path = Path(dst)
+            replace_calls.append((src_path, dst_path))
+            dst_path.write_text(src_path.read_text(encoding="utf-8"), encoding="utf-8")
+            src_path.unlink()
+
+        with mock.patch("vox.config.os.replace", side_effect=fake_replace):
+            # Act - write the persisted config
+            out_path = vox_config.write_persisted_config(
+                {"hotkey": "ctrl+space", "cue_volume": 0.5},
+                path=config_path,
+            )
+
+        # Assert - the final write used os.replace from a temp file in the same directory
+        assert out_path == config_path
+        assert config_path.read_text(encoding="utf-8") == (
+            'hotkey = "ctrl+space"\ncue_volume = 0.5\n'
+        )
+        assert len(replace_calls) == 1
+        assert replace_calls[0][1] == config_path
+        assert replace_calls[0][0].parent == tmp_path
+        assert replace_calls[0][0].suffix == ".tmp"
+
+    def test_write_persisted_config_rejects_invalid_edits(self, tmp_path: Path) -> None:
+        """Invalid file-backed updates must fail before any disk write occurs."""
+        # Arrange - attempt to persist an invalid hotkey to a new config path
+        config_path = tmp_path / "vox.toml"
+
+        with (
+            pytest.raises(vox_config.ConfigError, match="hotkey"),
+            mock.patch("vox.config.os.replace") as mock_replace,
+        ):
+            # Act - write invalid config
+            vox_config.write_persisted_config({"hotkey": ""}, path=config_path)
+
+        # Assert - the write fails before any atomic replace happens
+        mock_replace.assert_not_called()
+        assert not config_path.exists()
+
+    def test_update_persisted_config_merges_changes_before_write(self) -> None:
+        """Targeted updates should preserve other persisted keys."""
+        # Arrange - existing persisted config already has unrelated keys
+        with (
+            mock.patch.object(
+                vox_config,
+                "load_persisted_config",
+                return_value={"hotkey": "ctrl+space", "use_tray": False},
+            ),
+            mock.patch.object(vox_config, "write_persisted_config") as mock_write,
+        ):
+            # Act - update a single field
+            out = vox_config.update_persisted_config({"use_tray": True})
+
+        # Assert - the write payload preserves untouched fields
+        assert out == {"hotkey": "ctrl+space", "use_tray": True}
+        mock_write.assert_called_once_with(
+            {"hotkey": "ctrl+space", "use_tray": True},
+            path=None,
+        )
+
+    def test_get_env_override_fields_reports_active_overrides(self) -> None:
+        """UI metadata should identify which fields are superseded by env vars."""
+        # Arrange - activate a subset of config env overrides
+        with mock.patch.dict(
+            os.environ,
+            {
+                "VOX_HOTKEY": "alt+v",
+                "VOX_DEVICE_ID": "3",
+                "VOX_CUE_VOLUME": "0.1",
+            },
+            clear=False,
+        ):
+            # Act - inspect override metadata
+            out = vox_config.get_env_override_fields()
+
+        # Assert - only active overrides are reported with their source env vars
+        assert out == {
+            "hotkey": "VOX_HOTKEY",
+            "device_id": "VOX_DEVICE_ID",
+            "cue_volume": "VOX_CUE_VOLUME",
+        }
+
 
 @pytest.mark.unit
 class TestValidateOptionalStr:
@@ -372,6 +568,7 @@ class TestGetConfig:
         assert out["compute_type"] == "float32"
         assert out["compute_device"] == "cpu"
         assert out["injection_mode"] == "clipboard"
+        assert out["cue_volume"] == 0.5
 
     def test_returns_explicit_type_injection_mode(self) -> None:
         """get_config preserves the direct typing injection mode."""
@@ -385,3 +582,17 @@ class TestGetConfig:
             out = vox_config.get_config()
         # Assert - injection mode is preserved
         assert out["injection_mode"] == "type"
+
+    def test_returns_explicit_cue_volume(self) -> None:
+        """get_config preserves an explicitly configured cue volume."""
+        # Arrange - config provides cue volume
+        with mock.patch.object(
+            vox_config,
+            "load_config",
+            return_value={"hotkey": "ctrl+space", "cue_volume": 0.25},
+        ):
+            # Act - read config
+            out = vox_config.get_config()
+
+        # Assert - cue volume is preserved
+        assert out["cue_volume"] == 0.25
