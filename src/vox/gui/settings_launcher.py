@@ -125,7 +125,7 @@ def launch_settings_subprocess(
                 stderr=subprocess_module.DEVNULL,
                 creationflags=creationflags,
             )
-        start_new_session = cast(bool, platform_kwargs["start_new_session"])
+        start_new_session = cast(bool, platform_kwargs.get("start_new_session", True))
         return launcher(
             launch_command,
             stdin=subprocess_module.DEVNULL,
