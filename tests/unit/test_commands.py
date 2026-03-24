@@ -190,9 +190,10 @@ class TestHandleRun:
             # Act - call handle_run with stop_event
             handle_run(mock_console, stop_event=stop_ev)
 
-            # Assert - run_push_to_talk_loop called with stop_event; panel printed
+            # Assert - hotkey loop called once with an internal loop stop event
             mock_loop.assert_called_once()
-            assert mock_loop.call_args[1]["stop_event"] is stop_ev
+            loop_stop_event = mock_loop.call_args[1]["stop_event"]
+            assert isinstance(loop_stop_event, threading.Event)
             assert mock_console.print.call_count >= 1
 
     def test_on_audio_transcribes_sets_clipboard_and_prints_injected(self) -> None:
@@ -578,3 +579,111 @@ class TestHandleRun:
         # Assert - configured cue volume is forwarded to both playback calls
         cue_player.play_start.assert_called_once_with(volume_scale=0.25)
         cue_player.play_end.assert_called_once_with(volume_scale=0.25)
+
+    def test_handle_run_rebinds_hotkey_without_restart(self) -> None:
+        """Runtime should restart listener with a new hotkey after settings update."""
+        # Arrange - simulate one hotkey-change restart then final stop
+        mock_console = mock.Mock()
+        stop_ev = threading.Event()
+        run_calls: list[str] = []
+        watcher_calls = 0
+
+        def fake_loop(**kwargs: object) -> None:
+            run_calls.append(str(kwargs["hotkey_str"]))
+            loop_stop = kwargs["stop_event"]
+            assert isinstance(loop_stop, threading.Event)
+            # Return once watcher or stop requests a loop exit.
+            loop_stop.wait(timeout=0.05)
+
+        def fake_spawn_watcher(
+            *,
+            stop_event: threading.Event | None,
+            hotkey_str: str,
+            loop_stop_event: threading.Event,
+            reload_requested: threading.Event,
+        ) -> threading.Thread:
+            _ = hotkey_str
+            nonlocal watcher_calls
+            watcher_calls += 1
+
+            def worker() -> None:
+                # First loop requests reload; second loop requests final stop.
+                if watcher_calls == 1:
+                    reload_requested.set()
+                    loop_stop_event.set()
+                    return
+                if stop_event is not None:
+                    stop_event.set()
+                loop_stop_event.set()
+
+            thread = threading.Thread(target=worker, daemon=True)
+            thread.start()
+            return thread
+
+        with (
+            mock.patch("vox.commands.get_config") as mock_cfg,
+            mock.patch("vox.commands.load_model"),
+            mock.patch("vox.commands.preload_default_cues", return_value=mock.Mock()),
+            mock.patch("vox.commands._run_push_to_talk_loop", side_effect=fake_loop),
+            mock.patch(
+                "vox.commands._spawn_hotkey_reload_watcher",
+                side_effect=fake_spawn_watcher,
+            ),
+        ):
+            mock_cfg.side_effect = [
+                {
+                    "hotkey": "ctrl+f1",
+                    "device_id": None,
+                    "model_size": "base",
+                    "compute_type": "float32",
+                    "compute_device": "cpu",
+                    "injection_mode": "clipboard",
+                },
+                {
+                    "hotkey": "ctrl+f2",
+                    "device_id": None,
+                    "model_size": "base",
+                    "compute_type": "float32",
+                    "compute_device": "cpu",
+                    "injection_mode": "clipboard",
+                },
+            ]
+
+            # Act - run the runtime command with watcher-driven reload
+            handle_run(mock_console, stop_event=stop_ev)
+
+        # Assert - loop was restarted with the new hotkey and message surfaced
+        assert run_calls == ["ctrl+f1", "ctrl+f2"]
+        calls = [str(c) for c in mock_console.print.call_args_list]
+        assert any("Rebound hotkey" in c for c in calls)
+
+    def test_handle_run_without_stop_event_uses_direct_loop_for_ctrl_c(
+        self,
+    ) -> None:
+        """Terminal mode should keep direct listener path for Ctrl+C behavior."""
+        # Arrange - no external stop event means terminal-mode execution
+        mock_console = mock.Mock()
+
+        with (
+            mock.patch("vox.commands.get_config") as mock_cfg,
+            mock.patch("vox.commands.load_model"),
+            mock.patch("vox.commands.preload_default_cues", return_value=mock.Mock()),
+            mock.patch("vox.commands._run_push_to_talk_loop") as mock_loop,
+            mock.patch("vox.commands._spawn_hotkey_reload_watcher") as mock_watcher,
+        ):
+            mock_cfg.return_value = {
+                "hotkey": "ctrl+f1",
+                "device_id": None,
+                "model_size": "base",
+                "compute_type": "float32",
+                "compute_device": "cpu",
+                "injection_mode": "clipboard",
+            }
+
+            # Act - run in terminal mode without runtime stop event
+            handle_run(mock_console, stop_event=None)
+
+        # Assert - no watcher path; listener receives None stop_event directly
+        mock_watcher.assert_not_called()
+        mock_loop.assert_called_once()
+        assert mock_loop.call_args.kwargs["stop_event"] is None

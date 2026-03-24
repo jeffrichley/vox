@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import io
 import threading
+import time
 from importlib.resources import files
 
 import pystray  # type: ignore[import-untyped]
@@ -46,6 +47,46 @@ def _launch_settings(console: Console) -> bool:
         True when launch succeeds; False when it fails and is reported.
     """
     return launch_settings_from_runtime(console)
+
+
+def _run_icon_until_stopped(
+    *,
+    icon: pystray.Icon,
+    worker_done: threading.Event,
+    worker_error: list[BaseException],
+    stop_event: threading.Event,
+) -> None:
+    """Run tray icon loop on a thread and keep Ctrl+C responsive.
+
+    Args:
+        icon: Active tray icon instance.
+        worker_done: Signal set when push-to-talk worker exits.
+        worker_error: Shared sink of worker exceptions.
+        stop_event: Worker stop signal set by quit/interrupt paths.
+    """
+    icon_done = threading.Event()
+
+    def run_icon() -> None:
+        """Run the tray icon loop and signal completion when it exits."""
+        try:
+            icon.run()
+        finally:
+            icon_done.set()
+
+    icon_thread = threading.Thread(target=run_icon, daemon=True)
+    icon_thread.start()
+    try:
+        while not icon_done.is_set():
+            if worker_done.wait(timeout=0.2):
+                if worker_error:
+                    stop_event.set()
+                    icon.stop()
+                break
+            time.sleep(0.05)
+    except KeyboardInterrupt:
+        stop_event.set()
+        icon.stop()
+    icon_thread.join(timeout=2.0)
 
 
 def run_tray(console: Console) -> BaseException | None:
@@ -98,11 +139,16 @@ def run_tray(console: Console) -> BaseException | None:
 
     image = _load_icon_image()
     menu = pystray.Menu(
-        pystray.MenuItem("Settings...", on_settings),
+        pystray.MenuItem("Settings...", on_settings, default=True),
         pystray.MenuItem("Quit", on_quit),
     )
     icon = pystray.Icon("vox", image, "Vox — push-to-talk", menu=menu)
-    icon.run()
+    _run_icon_until_stopped(
+        icon=icon,
+        worker_done=worker_done,
+        worker_error=worker_error,
+        stop_event=stop_event,
+    )
 
     thread.join(timeout=2.0)
     if worker_error:

@@ -34,11 +34,24 @@ class TestSettingsLauncher:
         """Runtime launch should spawn a detached ``python -m vox settings`` process."""
         # Arrange - capture subprocess launch arguments
         popen_factory = mock.Mock(return_value=object())
+        fake_startupinfo = mock.Mock(dwFlags=0, wShowWindow=0)
 
-        with mock.patch.object(
-            settings_launcher,
-            "_popen_platform_kwargs",
-            return_value={"creationflags": 0},
+        with (
+            mock.patch.object(
+                settings_launcher,
+                "_popen_platform_kwargs",
+                return_value={"creationflags": 0},
+            ),
+            mock.patch.object(
+                settings_launcher,
+                "_settings_subprocess_executable",
+                return_value=settings_launcher.sys.executable,
+            ),
+            mock.patch.object(
+                settings_launcher,
+                "_windows_startupinfo",
+                return_value=fake_startupinfo,
+            ),
         ):
             # Act - launch the detached settings subprocess
             settings_launcher.launch_settings_subprocess(popen_factory=popen_factory)
@@ -52,6 +65,7 @@ class TestSettingsLauncher:
             "vox",
             "settings",
         ]
+        assert popen_factory.call_args.kwargs["startupinfo"] is fake_startupinfo
 
     def test_launch_settings_subprocess_raises_settings_launch_error_on_oserror(
         self,

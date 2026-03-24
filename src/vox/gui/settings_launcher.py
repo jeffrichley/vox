@@ -30,7 +30,10 @@ class SubprocessModuleProtocol(Protocol):
 
     DEVNULL: int
     CREATE_NEW_PROCESS_GROUP: int
-    DETACHED_PROCESS: int
+    CREATE_NO_WINDOW: int
+    STARTF_USESHOWWINDOW: int
+    SW_HIDE: int
+    STARTUPINFO: type
     Popen: PopenFactory
 
 
@@ -68,13 +71,31 @@ def run_settings_window_direct() -> None:
         raise SettingsLaunchError(f"Failed to open settings window: {e}") from e
 
 
+def _settings_subprocess_executable() -> str:
+    """Return interpreter path for detached GUI settings launch.
+
+    On Windows, prefer ``pythonw.exe`` when available so no console is created.
+
+    Returns:
+        Interpreter executable path for launching settings subprocess.
+    """
+    if os.name != "nt":
+        return sys.executable
+    executable = sys.executable
+    if executable.lower().endswith("python.exe"):
+        pythonw_path = executable[:-10] + "pythonw.exe"
+        if os.path.exists(pythonw_path):
+            return pythonw_path
+    return executable
+
+
 def _settings_subprocess_command() -> list[str]:
     """Return the command used to launch standalone settings.
 
     Returns:
         The argv sequence for the standalone settings process.
     """
-    return [sys.executable, "-m", "vox", "settings"]
+    return [_settings_subprocess_executable(), "-m", "vox", "settings"]
 
 
 def _popen_platform_kwargs() -> dict[str, object]:
@@ -88,10 +109,25 @@ def _popen_platform_kwargs() -> dict[str, object]:
         return {
             "creationflags": (
                 getattr(subprocess_module, "CREATE_NEW_PROCESS_GROUP", 0)
-                | getattr(subprocess_module, "DETACHED_PROCESS", 0)
+                | getattr(subprocess_module, "CREATE_NO_WINDOW", 0)
             )
         }
     return {"start_new_session": True}
+
+
+def _windows_startupinfo() -> object | None:
+    """Return STARTUPINFO configured to hide any console window on Windows.
+
+    Returns:
+        Startup info object on Windows; otherwise ``None``.
+    """
+    if os.name != "nt":
+        return None
+    subprocess_module = _subprocess_module()
+    startupinfo = subprocess_module.STARTUPINFO()
+    startupinfo.dwFlags |= getattr(subprocess_module, "STARTF_USESHOWWINDOW", 0)
+    startupinfo.wShowWindow = getattr(subprocess_module, "SW_HIDE", 0)
+    return cast(object, startupinfo)
 
 
 def launch_settings_subprocess(
@@ -118,12 +154,14 @@ def launch_settings_subprocess(
     try:
         if os.name == "nt":
             creationflags = cast(int, platform_kwargs["creationflags"])
+            startupinfo = _windows_startupinfo()
             return launcher(
                 launch_command,
                 stdin=subprocess_module.DEVNULL,
                 stdout=subprocess_module.DEVNULL,
                 stderr=subprocess_module.DEVNULL,
                 creationflags=creationflags,
+                startupinfo=startupinfo,
             )
         start_new_session = cast(bool, platform_kwargs.get("start_new_session", True))
         return launcher(

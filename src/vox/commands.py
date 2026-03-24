@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from collections.abc import Callable
 from importlib import import_module
 from typing import TYPE_CHECKING, Protocol, cast
@@ -14,7 +15,7 @@ from rich.table import Table
 
 from vox.audio_cues import CuePlaybackError, CuePlayer, preload_default_cues
 from vox.capture import list_devices, play_back, record_seconds
-from vox.config import get_config, get_transcription_options
+from vox.config import ConfigError, get_config, get_transcription_options
 from vox.inject import InjectError, paste_into_focused, set_clipboard, type_into_focused
 from vox.transcribe import TranscriptionError, load_model, transcribe
 
@@ -38,6 +39,9 @@ class HotkeyModuleProtocol(Protocol):
         ],
         None,
     ]
+
+
+_HOTKEY_RELOAD_POLL_SECONDS = 0.25
 
 
 def _run_push_to_talk_loop(  # noqa: PLR0913
@@ -73,6 +77,46 @@ def _run_push_to_talk_loop(  # noqa: PLR0913
         on_recording_stop,
         stop_event,
     )
+
+
+def _spawn_hotkey_reload_watcher(
+    *,
+    stop_event: threading.Event | None,
+    hotkey_str: str,
+    loop_stop_event: threading.Event,
+    reload_requested: threading.Event,
+) -> threading.Thread:
+    """Start a watcher thread that requests a loop restart on hotkey change.
+
+    Args:
+        stop_event: Optional external stop signal from runtime surfaces.
+        hotkey_str: Currently active hotkey string bound by the listener loop.
+        loop_stop_event: Internal stop signal for the current listener iteration.
+        reload_requested: Signal set when a hotkey change requires loop restart.
+
+    Returns:
+        Started daemon watcher thread.
+    """
+
+    def watch_hotkey() -> None:
+        """Poll config hotkey and request listener-loop restart when changed."""
+        while not loop_stop_event.is_set():
+            if stop_event is not None and stop_event.is_set():
+                loop_stop_event.set()
+                return
+            try:
+                current_hotkey = str(get_config()["hotkey"]).strip()
+            except (ConfigError, KeyError):
+                current_hotkey = hotkey_str
+            if current_hotkey and current_hotkey != hotkey_str:
+                reload_requested.set()
+                loop_stop_event.set()
+                return
+            time.sleep(_HOTKEY_RELOAD_POLL_SECONDS)
+
+    thread = threading.Thread(target=watch_hotkey, daemon=True)
+    thread.start()
+    return thread
 
 
 def handle_devices(console: Console) -> None:
@@ -287,13 +331,55 @@ def handle_run(
             title="Vox push-to-talk",
         )
     )
-    _run_push_to_talk_loop(
-        hotkey_str=hotkey_str,
-        device_id=device_id,
-        sample_rate=sample_rate,
-        channels=channels,
-        on_audio=on_audio,
-        on_recording_start=on_recording_start,
-        on_recording_stop=on_recording_stop,
-        stop_event=stop_event,
-    )
+    # Preserve terminal Ctrl+C behavior by keeping the original direct listener
+    # path when no external stop_event is provided.
+    if stop_event is None:
+        _run_push_to_talk_loop(
+            hotkey_str=hotkey_str,
+            device_id=device_id,
+            sample_rate=sample_rate,
+            channels=channels,
+            on_audio=on_audio,
+            on_recording_start=on_recording_start,
+            on_recording_stop=on_recording_stop,
+            stop_event=None,
+        )
+        return
+
+    active_hotkey = hotkey_str
+    while True:
+        loop_stop_event = threading.Event()
+        reload_requested = threading.Event()
+        watcher_thread = _spawn_hotkey_reload_watcher(
+            stop_event=stop_event,
+            hotkey_str=active_hotkey,
+            loop_stop_event=loop_stop_event,
+            reload_requested=reload_requested,
+        )
+        _run_push_to_talk_loop(
+            hotkey_str=active_hotkey,
+            device_id=device_id,
+            sample_rate=sample_rate,
+            channels=channels,
+            on_audio=on_audio,
+            on_recording_start=on_recording_start,
+            on_recording_stop=on_recording_stop,
+            stop_event=loop_stop_event,
+        )
+        loop_stop_event.set()
+        watcher_thread.join(timeout=0.5)
+        if stop_event is not None and stop_event.is_set():
+            return
+        if not reload_requested.is_set():
+            return
+        try:
+            next_hotkey = str(get_config()["hotkey"]).strip()
+        except (ConfigError, KeyError) as e:
+            console.print(
+                f"[yellow]Hotkey reload warning:[/yellow] {e}. Keeping {active_hotkey}."
+            )
+            continue
+        if not next_hotkey or next_hotkey == active_hotkey:
+            continue
+        active_hotkey = next_hotkey
+        console.print(f"[cyan]Rebound hotkey:[/cyan] [bold]{active_hotkey}[/bold]")

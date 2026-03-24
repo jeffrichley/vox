@@ -770,3 +770,40 @@ Execute every command to ensure zero regressions and feature correctness.
   - ensure incremental autosave validates against the controller's full current state so first-run edits do not fail on implied defaults
   - keep settings test-action imports local to preserve the intended lazy GUI import boundary
   - harden `Test Mic` status handling for `ConfigError`, `ValueError`, and `TranscriptionError`
+- 2026-03-24 hotkey capture correction:
+  - replace freeform hotkey text entry behavior with keypress-driven capture in the settings hotkey field
+  - while capture is active, update the field progressively from currently pressed keys (for example: `ALT-`, then `ALT-F12`)
+  - persist only on completed capture input and preserve existing validation/error messaging through the config layer
+
+## Execution Report (Addendum)
+
+2026-03-24 Hotkey capture correction
+
+- Status: completed
+- Scope:
+  - fix settings hotkey input behavior so users do not type key-code text manually
+  - ensure progressive display while pressing combinations (modifier(s) first, then trigger)
+- Files changed:
+  - `.ai/PLANS/004-autosave-settings-screen.md`
+  - `src/vox/gui/settings_window.py`
+  - `tests/unit/test_settings_window.py`
+  - `tests/unit/test_settings_hotkey_capture.py`
+- Commands run:
+  - `uv run pytest tests/unit/test_settings_window.py tests/unit/test_settings_hotkey_capture.py -q` -> pass
+  - `just lint` -> pass
+  - `just types` -> pass
+
+2026-03-24 Runtime hotkey rebind on settings close
+
+- Status: completed
+- Scope:
+  - apply updated hotkey without requiring a full Vox restart
+  - restart only the push-to-talk listener loop when the hotkey changes
+- Files changed:
+  - `.ai/PLANS/004-autosave-settings-screen.md`
+  - `src/vox/commands.py`
+  - `tests/unit/test_commands.py`
+- Commands run:
+  - `uv run pytest tests/unit/test_commands.py -q` -> pass
+  - `just lint` -> pass
+  - `just types` -> pass

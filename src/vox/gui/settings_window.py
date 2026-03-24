@@ -92,6 +92,11 @@ RESTART_REQUIRED_FIELDS: frozenset[str] = frozenset(
     }
 )
 
+_HOTKEY_MODIFIERS: tuple[str, ...] = ("ctrl", "shift", "alt", "cmd")
+_CTRL_EVENT_MASK = 0x4
+_SHIFT_EVENT_MASK = 0x1
+_ALT_EVENT_MASK = 0x8
+
 
 @dataclass(frozen=True)
 class StatusState:
@@ -443,9 +448,14 @@ class SettingsWindow:
         root.title("Vox Settings")
         root.geometry("620x540")
         root.minsize(580, 500)
+        root.protocol("WM_DELETE_WINDOW", self._on_window_close)
 
         self._status_var = tk.StringVar(value=controller.status.text)
         self._hotkey_var = tk.StringVar(value=str(controller.values["hotkey"]))
+        self._hotkey_modifier_order: list[str] = []
+        self._hotkey_active_modifiers: set[str] = set()
+        self._hotkey_active_trigger: str | None = None
+        self._captured_hotkey_value: str | None = None
         self._device_var = tk.StringVar(
             value=self._device_label(controller.values["device_id"])
         )
@@ -505,6 +515,9 @@ class SettingsWindow:
         ttk.Label(section, text="Hotkey").grid(row=0, column=0, sticky=tk.W)
         hotkey_entry = ttk.Entry(section, textvariable=self._hotkey_var, width=28)
         hotkey_entry.grid(row=0, column=1, sticky=tk.W, padx=(8, 8))
+        hotkey_entry.bind("<FocusIn>", self._on_hotkey_focus_in)
+        hotkey_entry.bind("<KeyPress>", self._on_hotkey_key_press)
+        hotkey_entry.bind("<KeyRelease>", self._on_hotkey_key_release)
         hotkey_entry.bind("<Return>", self._on_hotkey_commit)
         hotkey_entry.bind("<FocusOut>", self._on_hotkey_commit)
         self._add_override_note(section, "hotkey", row=1)
@@ -734,10 +747,93 @@ class SettingsWindow:
         self._controller.commit_choice(field_name, value)
         self._sync_status()
 
-    def _on_hotkey_commit(self, _event: tk.Event[tk.Entry]) -> None:
+    def _on_hotkey_commit(self, _event: tk.Event[tk.Entry] | None) -> None:
         """Persist the hotkey when editing is complete."""
-        self._controller.commit_text("hotkey", self._hotkey_var.get())
+        candidate = self._captured_hotkey_value or self._hotkey_var.get()
+        normalized = _normalize_hotkey_capture_value(candidate)
+        if normalized:
+            self._hotkey_var.set(_format_hotkey_display(normalized))
+        self._controller.commit_text("hotkey", normalized)
         self._sync_status()
+        self._captured_hotkey_value = None
+        self._hotkey_active_trigger = None
+        self._hotkey_active_modifiers.clear()
+        self._hotkey_modifier_order.clear()
+
+    def _on_window_close(self) -> None:
+        """Persist pending hotkey capture before closing the window."""
+        self._on_hotkey_commit(None)
+        self._root.destroy()
+
+    def _on_hotkey_focus_in(self, _event: tk.Event[tk.Entry]) -> None:
+        """Reset capture state when the hotkey field gains focus."""
+        self._captured_hotkey_value = None
+        self._hotkey_active_trigger = None
+        self._hotkey_active_modifiers.clear()
+        self._hotkey_modifier_order.clear()
+
+    def _on_hotkey_key_press(self, event: tk.Event[tk.Entry]) -> str:
+        """Capture and display hotkey parts from physical key presses.
+
+        Args:
+            event: Tk key-press event from the hotkey entry widget.
+
+        Returns:
+            Tk break marker so the entry does not insert raw key text.
+        """
+        token = _event_keysym_to_hotkey_token(event.keysym)
+        if token is None:
+            return "break"
+        if token in _HOTKEY_MODIFIERS:
+            self._hotkey_active_modifiers.add(token)
+            self._hotkey_modifier_order = _ordered_modifiers(
+                self._hotkey_active_modifiers
+            )
+        else:
+            self._hotkey_active_trigger = token
+        self._update_hotkey_capture_display()
+        return "break"
+
+    def _on_hotkey_key_release(self, event: tk.Event[tk.Entry]) -> str:
+        """Update hotkey preview as held keys are released.
+
+        Args:
+            event: Tk key-release event from the hotkey entry widget.
+
+        Returns:
+            Tk break marker so release events do not alter entry text directly.
+        """
+        token = _event_keysym_to_hotkey_token(event.keysym)
+        if token is None:
+            return "break"
+        if token in _HOTKEY_MODIFIERS:
+            self._hotkey_active_modifiers.discard(token)
+            self._hotkey_modifier_order = _ordered_modifiers(
+                self._hotkey_active_modifiers
+            )
+        elif self._hotkey_active_trigger == token:
+            self._hotkey_active_trigger = None
+        self._update_hotkey_capture_display()
+        return "break"
+
+    def _update_hotkey_capture_display(self) -> None:
+        """Refresh entry text from active held keys and captured combo."""
+        active_modifiers = [
+            modifier
+            for modifier in self._hotkey_modifier_order
+            if modifier in self._hotkey_active_modifiers
+        ]
+        active = _build_hotkey_value(active_modifiers, self._hotkey_active_trigger)
+        if self._hotkey_active_trigger is not None and active:
+            self._captured_hotkey_value = active
+        preview = _choose_hotkey_preview(
+            active=active,
+            captured=self._captured_hotkey_value,
+            has_trigger=(self._hotkey_active_trigger is not None),
+        )
+        if preview is None:
+            return
+        self._hotkey_var.set(_format_hotkey_display(preview))
 
     def _on_device_selected(self, _event: tk.Event[ttk.Combobox]) -> None:
         """Persist the selected input device immediately."""
@@ -857,6 +953,157 @@ def _coerce_float(value: SettingValue, *, default: float) -> float:
     if isinstance(value, int | float):
         return float(value)
     return default
+
+
+def _event_keysym_to_hotkey_token(keysym: str) -> str | None:
+    """Map Tk keysym names to persisted hotkey tokens.
+
+    Args:
+        keysym: Tk keysym string from a key event.
+
+    Returns:
+        Normalized hotkey token or ``None`` when the keysym is unsupported.
+    """
+    normalized = keysym.lower()
+    alias_map = {
+        "control_l": "ctrl",
+        "control_r": "ctrl",
+        "shift_l": "shift",
+        "shift_r": "shift",
+        "alt_l": "alt",
+        "alt_r": "alt",
+        "option_l": "alt",
+        "option_r": "alt",
+        "meta_l": "cmd",
+        "meta_r": "cmd",
+        "super_l": "cmd",
+        "super_r": "cmd",
+        "win_l": "cmd",
+        "win_r": "cmd",
+    }
+    token = alias_map.get(normalized, normalized)
+    if token in _HOTKEY_MODIFIERS:
+        return token
+    if len(token) == 1 and token.isprintable():
+        return token
+    if token.startswith("f") and token[1:].isdigit():
+        return token
+    allowed_named = {
+        "space",
+        "tab",
+        "escape",
+        "enter",
+        "backspace",
+        "delete",
+        "insert",
+        "home",
+        "end",
+        "page_up",
+        "page_down",
+        "up",
+        "down",
+        "left",
+        "right",
+    }
+    return token if token in allowed_named else None
+
+
+def _modifier_tokens_from_event_state(state: int, *, include_alt: bool) -> list[str]:
+    """Extract active modifier tokens from Tk event state bitmasks.
+
+    Args:
+        state: Tk event state bitmask.
+        include_alt: Whether to include ALT when the ALT bit is present.
+
+    Returns:
+        Active normalized modifier tokens in deterministic order.
+    """
+    modifiers: list[str] = []
+    if state & _CTRL_EVENT_MASK:
+        modifiers.append("ctrl")
+    if state & _SHIFT_EVENT_MASK:
+        modifiers.append("shift")
+    if include_alt and state & _ALT_EVENT_MASK:
+        modifiers.append("alt")
+    return modifiers
+
+
+def _ordered_modifiers(modifiers: set[str]) -> list[str]:
+    """Return modifiers in canonical display/persist order.
+
+    Args:
+        modifiers: Active modifier token set.
+
+    Returns:
+        Modifier list ordered for display and persistence.
+    """
+    return [modifier for modifier in _HOTKEY_MODIFIERS if modifier in modifiers]
+
+
+def _choose_hotkey_preview(
+    *, active: str, captured: str | None, has_trigger: bool
+) -> str | None:
+    """Choose what to show: active combo-in-progress or last complete combo.
+
+    Args:
+        active: Current in-progress capture text from held keys.
+        captured: Last completed hotkey capture, if one exists.
+        has_trigger: Whether the current in-progress state includes a trigger key.
+
+    Returns:
+        Preferred preview value for the hotkey entry or ``None``.
+    """
+    if has_trigger:
+        return active or captured
+    if captured:
+        return captured
+    return active or None
+
+
+def _build_hotkey_value(modifiers: list[str], trigger: str | None) -> str:
+    """Build normalized hotkey text from held modifiers and trigger.
+
+    Args:
+        modifiers: Ordered active modifiers.
+        trigger: Trigger token or ``None`` when not captured yet.
+
+    Returns:
+        Normalized hotkey string suitable for persistence.
+    """
+    if trigger is None:
+        return f"{'+'.join(modifiers)}+" if modifiers else ""
+    if modifiers:
+        return f"{'+'.join(modifiers)}+{trigger}"
+    return trigger
+
+
+def _format_hotkey_display(value: str) -> str:
+    """Render normalized hotkey text in user-facing uppercase form.
+
+    Args:
+        value: Normalized persisted hotkey text.
+
+    Returns:
+        Display-formatted hotkey text for the settings entry.
+    """
+    return value.replace("+", "-").upper()
+
+
+def _normalize_hotkey_capture_value(value: str) -> str:
+    """Convert user-facing hotkey preview text into normalized persisted form.
+
+    Args:
+        value: User-facing hotkey capture text from the entry.
+
+    Returns:
+        Normalized hotkey string suitable for parser and persistence.
+    """
+    out = value.strip().lower().replace("-", "+")
+    while "++" in out:
+        out = out.replace("++", "+")
+    if out.endswith("+"):
+        out = out[:-1]
+    return out
 
 
 def _confirm_restore_defaults() -> bool:
