@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.4](https://github.com/jeffrichley/vox/compare/v0.2.3...v0.2.4) (2026-03-24)
+
+
+### Bug Fixes
+
+* **settings:** make hotkey capture and runtime rebinding reliable ([cf5bace](https://github.com/jeffrichley/vox/commit/cf5bace1978694f6edf61a031e173a3c941dec86))
+
+
+### Documentation
+
+* **plan:** close tray packaging validation ([969e081](https://github.com/jeffrichley/vox/commit/969e0816df9c504c4ffa269ffd0e088edac77fad))
+
 ## [0.2.3](https://github.com/jeffrichley/vox/compare/v0.2.2...v0.2.3) (2026-03-18)
 
 
