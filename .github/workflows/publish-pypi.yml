@@ -48,6 +48,35 @@ jobs:
             echo "tag=$(gh release list --limit 1 --json tagName -q '.[0].tagName')" >> $GITHUB_OUTPUT
           fi
 
+      - name: Verify required release assets exist
+        if: github.event_name == 'release' || steps.fresh.outputs.skip != '1'
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          REQUIRED=(
+            "vox-${TAG}-windows-amd64.zip"
+            "vox-${TAG}-macos-arm64.zip"
+            "vox-${TAG}-linux-x86_64.tar.gz"
+          )
+          for attempt in $(seq 1 45); do
+            ASSET_NAMES="$(gh release view "$TAG" --json assets -q '.assets[].name')"
+            echo "Asset check attempt ${attempt}/45 for ${TAG}"
+            echo "$ASSET_NAMES"
+            MISSING=0
+            for expected in "${REQUIRED[@]}"; do
+              if ! echo "$ASSET_NAMES" | grep -Fxq "$expected"; then
+                MISSING=1
+                echo "Still missing: $expected"
+              fi
+            done
+            if [ "$MISSING" -eq 0 ]; then
+              echo "All required release assets are present."
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "Timed out waiting for required release assets."
+          exit 1
+
       - name: Checkout
         if: github.event_name == 'release' || steps.fresh.outputs.skip != '1'
         uses: actions/checkout@v4
