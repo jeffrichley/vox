@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.5](https://github.com/jeffrichley/vox/compare/v0.2.4...v0.2.5) (2026-05-15)
+
+
+### Bug Fixes
+
+* **ci:** make pip-audit non-blocking ([#22](https://github.com/jeffrichley/vox/issues/22)) ([397decd](https://github.com/jeffrichley/vox/commit/397decd91cece7d9c623f6dc8b983a285f665090))
+
 ## [0.2.4](https://github.com/jeffrichley/vox/compare/v0.2.3...v0.2.4) (2026-03-24)
 
 
