@@ -53,8 +53,11 @@ docstr-coverage:
     uv run docstr-coverage src --skip-private --skip-magic --skip-init -v 2
 
 # Security: dependency vulnerabilities (pip-audit)
+# Non-blocking: pip-audit findings are informational, not a CI gate. Dependabot
+# PRs each fix one vulnerability at a time, so blocking on any remaining
+# unfixed vuln creates a catch-22 where no Dependabot PR can ever pass CI.
 audit:
-    uv run pip-audit
+    -uv run pip-audit
 
 # Security: static analysis (bandit); config in pyproject.toml
 bandit:
