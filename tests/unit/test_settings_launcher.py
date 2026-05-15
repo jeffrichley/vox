@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from unittest import mock
 
 import pytest
@@ -30,8 +31,16 @@ class TestSettingsLauncher:
         # Assert - the settings window entrypoint was invoked once
         fake_module.run_settings_window.assert_called_once_with()
 
+    @pytest.mark.skipif(
+        os.name != "nt", reason="startupinfo is Windows-only Popen kwarg"
+    )
     def test_launch_settings_subprocess_uses_module_entrypoint(self) -> None:
-        """Runtime launch should spawn a detached ``python -m vox settings`` process."""
+        """Runtime launch should spawn a detached ``python -m vox settings`` process.
+
+        Windows-only: this test asserts on the ``startupinfo`` kwarg, which is
+        only set on the Windows branch of ``launch_settings_subprocess``.
+        Non-Windows uses ``start_new_session`` instead (see prod code).
+        """
         # Arrange - capture subprocess launch arguments
         popen_factory = mock.Mock(return_value=object())
         fake_startupinfo = mock.Mock(dwFlags=0, wShowWindow=0)
