@@ -31,7 +31,9 @@ class TestSettingsLauncher:
         # Assert - the settings window entrypoint was invoked once
         fake_module.run_settings_window.assert_called_once_with()
 
-    @pytest.mark.skipif(os.name != "nt", reason="startupinfo is Windows-only Popen kwarg")
+    @pytest.mark.skipif(
+        os.name != "nt", reason="startupinfo is Windows-only Popen kwarg"
+    )
     def test_launch_settings_subprocess_uses_module_entrypoint(self) -> None:
         """Runtime launch should spawn a detached ``python -m vox settings`` process.
 
