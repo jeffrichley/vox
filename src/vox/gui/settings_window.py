@@ -211,7 +211,7 @@ class SettingsController:
             self.values.update(dict(persisted_config))
         self.overridden_fields = dict(overridden_fields or {})
         if save_updates is update_persisted_config:
-            self._save_updates = lambda updates: update_persisted_config(
+            self._save_updates: SaveUpdates = lambda updates: update_persisted_config(
                 updates,
                 base=self.values,
             )

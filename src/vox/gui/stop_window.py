@@ -130,7 +130,7 @@ def run_stop_window(console: Console) -> BaseException | None:
     def _on_stop() -> None:
         """User clicked Stop: signal worker, disable button, schedule window close."""
         stop_event.set()
-        stop_btn.state(["disabled"])
+        stop_btn.state(["disabled"])  # type: ignore[no-untyped-call]  # ttk.Widget.state is unannotated in typeshed
         root.after(100, _wait_then_close)
 
     def _on_settings() -> None:
