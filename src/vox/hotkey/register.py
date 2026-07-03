@@ -254,7 +254,7 @@ class _PushToTalkSession:
             stop_event: Optional event; when set, a watcher thread stops the
                 keyboard listener so this method returns.
         """
-        listener_ref: list = []
+        listener_ref: list[keyboard.Listener] = []
         proc_thread = threading.Thread(target=self._processor_loop)
         proc_thread.start()
 
