@@ -14,7 +14,7 @@ e2e:
 
 # Run all tests with coverage report
 test-cov:
-    uv run pytest --cov=src/vox --cov-report=term-missing --cov-report=html
+    uv run pytest --cov=src/vox --cov-report=term-missing --cov-report=html --cov-report=xml
 
 # Format code (ruff)
 format:
