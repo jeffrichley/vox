@@ -391,11 +391,13 @@ class TestHandleRun:
         # Act - invoke on_audio with clipboard_and_paste and paste_into_focused raising
         with (
             mock.patch("vox.commands.transcribe", return_value="hi"),
+            mock.patch("vox.commands.get_clipboard", return_value="previous"),
             mock.patch("vox.commands.set_clipboard"),
             mock.patch(
                 "vox.commands.paste_into_focused",
                 side_effect=InjectError("paste failed"),
             ),
+            mock.patch("vox.commands._pause_before_clipboard_restore"),
         ):
             on_audio(np.zeros(1600, dtype=np.float32))
 
