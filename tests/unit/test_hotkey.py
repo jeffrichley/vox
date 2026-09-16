@@ -215,3 +215,14 @@ class TestKeyMatches:
         result = _key_matches(key, "v")
         # Assert - returns True
         assert result is True
+
+    def test_key_matches_uses_vk_when_alt_clears_char(self) -> None:
+        """When Alt clears char, letter triggers still match via vk."""
+        # Arrange - Windows-style KeyCode with vk only (char None)
+        key = keyboard.KeyCode.from_vk(ord("D"))
+
+        # Act - match against letter trigger
+        result = _key_matches(key, "d")
+
+        # Assert - vk fallback matches
+        assert result is True
