@@ -199,3 +199,70 @@ def record_until_stop(
     if not blocks:
         return np.array([], dtype=np.float32).reshape(0, channels)
     return np.concatenate(blocks, axis=0)
+
+
+def start_framed_input_stream(  # noqa: PLR0913
+    on_frame: Callable[[np.ndarray], None],
+    stop_event: threading.Event,
+    *,
+    device_id: int | None = None,
+    sample_rate: int = 16000,
+    channels: int = 1,
+    blocksize: int = 512,
+) -> None:
+    """Run a long-lived input stream that forwards fixed-size mono frames.
+
+    The stream callback only copies audio; ``on_frame`` receives a 1-D float32
+    array of length ``blocksize``. Blocks until ``stop_event`` is set.
+
+    Args:
+        on_frame: Called with each copied mono frame.
+        stop_event: When set, the stream stops and this function returns.
+        device_id: Sounddevice device index; None for default input.
+        sample_rate: Sample rate in Hz (16 kHz for Continuous dictation).
+        channels: Number of channels (1 = mono).
+        blocksize: Samples per callback frame (512 for Silero VAD).
+    """
+    sd = _sd()
+
+    def callback(
+        indata: np.ndarray,
+        _frames: int,
+        _time: object,
+        _status: object,
+    ) -> None:
+        """Copy the block and forward a mono float32 frame.
+
+        Args:
+            indata: Incoming audio block from sounddevice.
+            _frames: Unused frame count.
+            _time: Unused timestamp.
+            _status: Unused status.
+        """
+        copied = indata.copy()
+        mono_channel = 0
+        if copied.ndim > 1:
+            frame = copied[:, mono_channel].astype(np.float32, copy=False)
+        else:
+            frame = copied.astype(np.float32, copy=False).reshape(-1)
+        if frame.size != blocksize:
+            padded = np.zeros(blocksize, dtype=np.float32)
+            n = min(frame.size, blocksize)
+            padded[:n] = frame[:n]
+            frame = padded
+        on_frame(frame)
+
+    stream = sd.InputStream(
+        device=device_id,
+        channels=channels,
+        samplerate=sample_rate,
+        blocksize=blocksize,
+        dtype="float32",
+        callback=callback,
+    )
+    stream.start()
+    try:
+        stop_event.wait()
+    finally:
+        stream.stop()
+        stream.close()

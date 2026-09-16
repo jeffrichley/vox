@@ -1,4 +1,4 @@
-"""Global hotkey registration for push-to-talk: press to start, release to stop."""
+"""Global hotkey registration for push-to-talk and Continuous dictation toggle."""
 
 from __future__ import annotations
 
@@ -100,6 +100,9 @@ def _key_matches(
 ) -> bool:
     """Return True if key matches the trigger (modifier-agnostic).
 
+    On Windows, holding Alt often clears ``KeyCode.char``; letter triggers then
+    match via the virtual-key code instead.
+
     Args:
         key: Key from listener callback.
         trigger: Expected trigger key (char or Key).
@@ -110,7 +113,13 @@ def _key_matches(
     if key is None:
         return False
     if isinstance(trigger, str):
-        return bool(getattr(key, "char", None) == trigger or key == trigger)
+        if getattr(key, "char", None) == trigger or key == trigger:
+            return True
+        if len(trigger) == 1:
+            vk = getattr(key, "vk", None)
+            if vk is not None:
+                return int(vk) == ord(trigger.upper())
+        return False
     return bool(key == trigger)
 
 
@@ -132,21 +141,32 @@ class _RecordingConfig:
     channels: int
 
 
+@dataclass(frozen=True)
+class _ContinuousBinding:
+    """Optional Continuous dictation toggle binding."""
+
+    hotkey_str: str
+    on_toggle: Callable[[], None]
+    is_active: Callable[[], bool]
+
+
 class _PushToTalkSession:
-    """Holds state and callbacks for one push-to-talk listener run."""
+    """Holds state and callbacks for one push-to-talk (+ optional toggle) run."""
 
     def __init__(
         self,
         recording_config: _RecordingConfig,
         on_audio: Callable[[np.ndarray], None],
         recording_hooks: _RecordingHooks | None = None,
+        continuous: _ContinuousBinding | None = None,
     ) -> None:
-        """Initialize one push-to-talk session with optional recording hooks.
+        """Initialize one push-to-talk session with optional Continuous toggle.
 
         Args:
             recording_config: Static hotkey and capture settings for the session.
             on_audio: Callback invoked with the completed recording buffer.
             recording_hooks: Optional start/stop callbacks around recording.
+            continuous: Optional Continuous dictation toggle binding.
         """
         self.modifier_keys, self.trigger_key = _parse_hotkey(
             recording_config.hotkey_str
@@ -156,6 +176,14 @@ class _PushToTalkSession:
         self.channels = recording_config.channels
         self.on_audio = on_audio
         self.recording_hooks = recording_hooks or _RecordingHooks()
+        self.continuous = continuous
+        if continuous is not None:
+            self.continuous_modifiers, self.continuous_trigger = _parse_hotkey(
+                continuous.hotkey_str
+            )
+        else:
+            self.continuous_modifiers = frozenset()
+            self.continuous_trigger = ""
         self.current_modifiers: set[keyboard.Key] = set()
         self.recording_thread: threading.Thread | None = None
         self.stop_event: threading.Event | None = None
@@ -164,6 +192,7 @@ class _PushToTalkSession:
         self.queue: Queue[tuple[threading.Thread, list[np.ndarray | None]] | None] = (
             Queue()
         )
+        self._toggle_armed = True
 
     def _run_record(self, holder: list[np.ndarray | None]) -> None:
         """Record until stop_event is set; store buffer in holder[0].
@@ -193,8 +222,70 @@ class _PushToTalkSession:
             if holder and holder[0] is not None:
                 self.on_audio(holder[0])
 
+    def _combo_satisfied(self, required: frozenset[keyboard.Key]) -> bool:
+        """Return True when all required modifiers are currently held.
+
+        Args:
+            required: Modifier set that must be a subset of current modifiers.
+
+        Returns:
+            Whether the combo's modifiers are satisfied.
+        """
+        return required <= self.current_modifiers
+
+    def _winning_binding(
+        self,
+        key: keyboard.Key | keyboard.KeyCode | None,
+    ) -> str | None:
+        """Return 'continuous', 'ptt', or None for the winning binding on press.
+
+        When both combos are satisfied, the binding with more modifiers wins.
+
+        Args:
+            key: Trigger key from the listener.
+
+        Returns:
+            Winning binding name, or None if no combo matches.
+        """
+        ptt_match = _key_matches(key, self.trigger_key) and self._combo_satisfied(
+            self.modifier_keys
+        )
+        cont_match = False
+        if self.continuous is not None:
+            cont_match = _key_matches(
+                key, self.continuous_trigger
+            ) and self._combo_satisfied(self.continuous_modifiers)
+        if ptt_match and cont_match:
+            if len(self.continuous_modifiers) > len(self.modifier_keys):
+                return "continuous"
+            if len(self.modifier_keys) > len(self.continuous_modifiers):
+                return "ptt"
+            # Equal modifier counts: prefer Continuous when both match.
+            return "continuous"
+        if cont_match:
+            return "continuous"
+        if ptt_match:
+            return "ptt"
+        return None
+
+    def _start_recording(self) -> None:
+        """Start a push-to-talk recording thread if not already recording."""
+        if self.recording_thread is not None:
+            return
+        if self.continuous is not None and self.continuous.is_active():
+            return
+        self.stop_event = threading.Event()
+        holder: list[np.ndarray | None] = [None]
+        self.result_holder = holder
+        self.recording_thread = threading.Thread(
+            target=self._run_record, args=(holder,)
+        )
+        if self.recording_hooks.on_start is not None:
+            self.recording_hooks.on_start()
+        self.recording_thread.start()
+
     def _on_press(self, key: keyboard.Key | keyboard.KeyCode | None) -> None:
-        """On key press: track modifiers; if hotkey combo, start recording.
+        """On key press: track modifiers; fire toggle or start recording.
 
         Args:
             key: Key from listener callback.
@@ -204,25 +295,18 @@ class _PushToTalkSession:
             with self.lock:
                 self.current_modifiers.add(norm)
             return
-        if not _key_matches(key, self.trigger_key):
-            return
         with self.lock:
-            if (
-                self.modifier_keys <= self.current_modifiers
-                and self.recording_thread is None
-            ):
-                self.stop_event = threading.Event()
-                holder: list[np.ndarray | None] = [None]
-                self.result_holder = holder
-                self.recording_thread = threading.Thread(
-                    target=self._run_record, args=(holder,)
-                )
-                if self.recording_hooks.on_start is not None:
-                    self.recording_hooks.on_start()
-                self.recording_thread.start()
+            winner = self._winning_binding(key)
+            if winner == "continuous" and self.continuous is not None:
+                if self._toggle_armed:
+                    self._toggle_armed = False
+                    self.continuous.on_toggle()
+                return
+            if winner == "ptt":
+                self._start_recording()
 
     def _on_release(self, key: keyboard.Key | keyboard.KeyCode | None) -> None:
-        """On trigger key release: stop recording and queue buffer for callback.
+        """On release: re-arm toggle and/or stop push-to-talk recording.
 
         Args:
             key: Key from listener callback.
@@ -232,9 +316,13 @@ class _PushToTalkSession:
             with self.lock:
                 self.current_modifiers.discard(norm)
             return
-        if not _key_matches(key, self.trigger_key):
-            return
         with self.lock:
+            if self.continuous is not None and _key_matches(
+                key, self.continuous_trigger
+            ):
+                self._toggle_armed = True
+            if not _key_matches(key, self.trigger_key):
+                return
             if self.recording_thread is None or self.stop_event is None:
                 return
             self.stop_event.set()
@@ -293,8 +381,11 @@ def run_push_to_talk_loop(  # noqa: PLR0913
     on_recording_start: Callable[[], None] | None = None,
     on_recording_stop: Callable[[], None] | None = None,
     stop_event: threading.Event | None = None,
+    continuous_hotkey: str | None = None,
+    on_continuous_toggle: Callable[[], None] | None = None,
+    is_continuous_active: Callable[[], bool] | None = None,
 ) -> None:
-    """Run push-to-talk: press hotkey to start recording, release to stop.
+    """Run push-to-talk with an optional Continuous dictation toggle.
 
     Blocks until the listener is stopped. On each hotkey release,
     on_audio(audio_buffer) is called with the recorded float32 mono array.
@@ -304,7 +395,7 @@ def run_push_to_talk_loop(  # noqa: PLR0913
     and this function returns (for use by CLI stop button, etc.).
 
     Args:
-        hotkey_str: Combination like 'ctrl+shift+v' or 'ctrl+v'.
+        hotkey_str: Push-to-talk combination like 'ctrl+shift+v'.
         device_id: Sounddevice device index; None for default input.
         sample_rate: Sample rate in Hz (e.g. 16000).
         channels: Number of channels (1 for mono).
@@ -312,7 +403,21 @@ def run_push_to_talk_loop(  # noqa: PLR0913
         on_recording_start: Optional callback invoked immediately before recording.
         on_recording_stop: Optional callback invoked immediately after stop signal.
         stop_event: Optional event; when set, the listener is stopped and run returns.
+        continuous_hotkey: Optional Continuous toggle combo (default unused).
+        on_continuous_toggle: Called when the Continuous toggle fires.
+        is_continuous_active: When True, push-to-talk presses are ignored.
     """
+    continuous: _ContinuousBinding | None = None
+    if (
+        continuous_hotkey
+        and on_continuous_toggle is not None
+        and is_continuous_active is not None
+    ):
+        continuous = _ContinuousBinding(
+            hotkey_str=continuous_hotkey,
+            on_toggle=on_continuous_toggle,
+            is_active=is_continuous_active,
+        )
     session = _PushToTalkSession(
         recording_config=_RecordingConfig(
             hotkey_str=hotkey_str,
@@ -325,5 +430,6 @@ def run_push_to_talk_loop(  # noqa: PLR0913
             on_start=on_recording_start,
             on_stop=on_recording_stop,
         ),
+        continuous=continuous,
     )
     session.run(stop_event=stop_event)

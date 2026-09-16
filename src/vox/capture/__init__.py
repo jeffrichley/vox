@@ -9,6 +9,7 @@ from vox.capture.stream import (
     play_back,
     record_seconds,
     record_until_stop,
+    start_framed_input_stream,
 )
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "play_back",
     "record_seconds",
     "record_until_stop",
+    "start_framed_input_stream",
 ]

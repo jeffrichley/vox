@@ -14,8 +14,15 @@ from rich.panel import Panel
 from rich.table import Table
 
 from vox.audio_cues import CuePlaybackError, CuePlayer, preload_default_cues
-from vox.capture import list_devices, play_back, record_seconds
+from vox.capture import (
+    list_devices,
+    play_back,
+    record_seconds,
+    start_framed_input_stream,
+)
 from vox.config import ConfigError, get_config, get_transcription_options
+from vox.continuous.session import ContinuousSession
+from vox.continuous.vad import FRAME_SAMPLES, load_streaming_vad
 from vox.inject import (
     InjectError,
     get_clipboard,
@@ -28,23 +35,13 @@ from vox.transcribe import TranscriptionError, load_model, transcribe
 if TYPE_CHECKING:
     from faster_whisper import WhisperModel  # type: ignore[import-untyped]
 
+_CONTINUOUS_HOTKEY = "ctrl+alt+d"
+
 
 class HotkeyModuleProtocol(Protocol):
     """Minimal hotkey module protocol used by the runtime command layer."""
 
-    run_push_to_talk_loop: Callable[
-        [
-            str,
-            int | None,
-            int,
-            int,
-            Callable[[np.ndarray], None],
-            Callable[[], None] | None,
-            Callable[[], None] | None,
-            threading.Event | None,
-        ],
-        None,
-    ]
+    run_push_to_talk_loop: Callable[..., None]
 
 
 _HOTKEY_RELOAD_POLL_SECONDS = 0.25
@@ -178,6 +175,9 @@ def _run_push_to_talk_loop(  # noqa: PLR0913
     on_recording_start: Callable[[], None] | None = None,
     on_recording_stop: Callable[[], None] | None = None,
     stop_event: threading.Event | None = None,
+    continuous_hotkey: str | None = None,
+    on_continuous_toggle: Callable[[], None] | None = None,
+    is_continuous_active: Callable[[], bool] | None = None,
 ) -> None:
     """Lazy-load and run the push-to-talk loop implementation.
 
@@ -190,6 +190,9 @@ def _run_push_to_talk_loop(  # noqa: PLR0913
         on_recording_start: Optional callback invoked immediately before recording.
         on_recording_stop: Optional callback invoked immediately after stop signal.
         stop_event: Optional signal used to stop the loop externally.
+        continuous_hotkey: Optional Continuous dictation toggle combo.
+        on_continuous_toggle: Optional Continuous toggle callback.
+        is_continuous_active: Optional predicate gating push-to-talk while active.
     """
     hotkey_module = cast(HotkeyModuleProtocol, import_module("vox.hotkey"))
     hotkey_module.run_push_to_talk_loop(
@@ -201,6 +204,9 @@ def _run_push_to_talk_loop(  # noqa: PLR0913
         on_recording_start,
         on_recording_stop,
         stop_event,
+        continuous_hotkey,
+        on_continuous_toggle,
+        is_continuous_active,
     )
 
 
@@ -391,20 +397,104 @@ def _build_audio_handler(
     return on_audio
 
 
+def _build_continuous_session(  # noqa: PLR0913
+    console: Console,
+    model: WhisperModel,
+    injection_mode: str,
+    device_id: int | None,
+    sample_rate: int,
+    channels: int,
+    on_recording_start: Callable[[], None],
+    on_recording_stop: Callable[[], None],
+) -> ContinuousSession:
+    """Build the Continuous dictation session for one ``handle_run`` lifetime.
+
+    Args:
+        console: Rich console for Injection and error reporting.
+        model: Preloaded Whisper model reused across Commits.
+        injection_mode: Configured Injection mode name.
+        device_id: Optional input device index.
+        sample_rate: Capture sample rate in Hz.
+        channels: Capture channel count.
+        on_recording_start: Start cue callback reused as Continuous start cue.
+        on_recording_stop: End cue callback reused as Continuous end cue.
+
+    Returns:
+        Idle ContinuousSession (no stream/VAD until first toggle-on).
+    """
+    injector = _resolve_injector(injection_mode)
+
+    def deliverer(text: str) -> None:
+        """Inject committed Continuous text (already includes trailing space).
+
+        Args:
+            text: Committed transcription including a trailing space.
+        """
+        injector(console, text)
+
+    def stream_starter(
+        on_frame: Callable[[np.ndarray], None],
+        stop_event: threading.Event,
+    ) -> None:
+        """Start the long-lived 512-sample Continuous microphone stream.
+
+        Args:
+            on_frame: Callback invoked with each mono float32 frame.
+            stop_event: Set when listening should stop.
+        """
+        start_framed_input_stream(
+            on_frame,
+            stop_event,
+            device_id=device_id,
+            sample_rate=sample_rate,
+            channels=channels,
+            blocksize=FRAME_SAMPLES,
+        )
+
+    def transcriber(audio: np.ndarray) -> str:
+        """Transcribe one Committed Utterance.
+
+        Args:
+            audio: Utterance samples as a float32 array.
+
+        Returns:
+            Transcribed text for Injection.
+        """
+        return transcribe(audio, model=model)
+
+    def reporter(message: str) -> None:
+        """Surface Continuous runtime failures without failing silently.
+
+        Args:
+            message: Error detail to print.
+        """
+        console.print(f"[red]Continuous dictation error:[/red] {message}")
+
+    return ContinuousSession(
+        stream_starter=stream_starter,
+        speech_detector_factory=load_streaming_vad,
+        transcriber=transcriber,
+        deliverer=deliverer,
+        play_start=on_recording_start,
+        play_end=on_recording_stop,
+        reporter=reporter,
+    )
+
+
 def handle_run(
     console: Console,
     stop_event: threading.Event | None = None,
 ) -> None:
-    """Start push-to-talk loop: hotkey to record, release to transcribe and inject.
+    """Start push-to-talk and Continuous dictation for one run.
 
-    Loads config from ~/.vox/vox.toml (or VOX_CONFIG). On each hotkey release,
-    recorded audio is transcribed and placed on the clipboard (and optionally
-    pasted into the focused window if injection_mode is clipboard_and_paste).
+    Loads config from ~/.vox/vox.toml (or VOX_CONFIG). On each push-to-talk
+    hotkey release, recorded audio is transcribed and Injected. Continuous
+    dictation is toggled with ``ctrl+alt+d`` and Commits on Pause.
     Runs until stopped (KeyboardInterrupt or stop_event set).
 
     Args:
         console: Rich console for output.
-        stop_event: If set, the push-to-talk loop exits (e.g. for CLI stop button).
+        stop_event: If set, the hotkey loop exits (e.g. for CLI stop button).
     """
     cfg = get_config()
     hotkey_str = cfg["hotkey"]
@@ -430,40 +520,40 @@ def handle_run(
         cue_volume,
     )
     on_audio = _build_audio_handler(console, model, injection_mode)
+    continuous = _build_continuous_session(
+        console,
+        model,
+        injection_mode,
+        device_id,
+        sample_rate,
+        channels,
+        on_recording_start,
+        on_recording_stop,
+    )
+    continuous.start()
 
     console.print(
         Panel(
-            f"Hotkey: [bold]{hotkey_str}[/bold]\n"
-            "Press and hold to record, release to transcribe and inject.\n"
+            f"Push-to-talk: [bold]{hotkey_str}[/bold] "
+            "(hold to record, release to transcribe and inject)\n"
+            f"Continuous dictation: [bold]{_CONTINUOUS_HOTKEY}[/bold] "
+            "(tap to toggle; Commits on Pause)\n"
             "Press Ctrl+C to exit.",
-            title="Vox push-to-talk",
+            title="Vox",
         )
     )
-    # Preserve terminal Ctrl+C behavior by keeping the original direct listener
-    # path when no external stop_event is provided.
-    if stop_event is None:
-        _run_push_to_talk_loop(
-            hotkey_str=hotkey_str,
-            device_id=device_id,
-            sample_rate=sample_rate,
-            channels=channels,
-            on_audio=on_audio,
-            on_recording_start=on_recording_start,
-            on_recording_stop=on_recording_stop,
-            stop_event=None,
-        )
-        return
 
-    active_hotkey = hotkey_str
-    while True:
-        loop_stop_event = threading.Event()
-        reload_requested = threading.Event()
-        watcher_thread = _spawn_hotkey_reload_watcher(
-            stop_event=stop_event,
-            hotkey_str=active_hotkey,
-            loop_stop_event=loop_stop_event,
-            reload_requested=reload_requested,
-        )
+    def run_loop(
+        *,
+        active_hotkey: str,
+        loop_stop: threading.Event | None,
+    ) -> None:
+        """Run one hotkey listener pass with Continuous toggle wired in.
+
+        Args:
+            active_hotkey: Push-to-talk hotkey for this listener pass.
+            loop_stop: Optional stop event for reload or external quit.
+        """
         _run_push_to_talk_loop(
             hotkey_str=active_hotkey,
             device_id=device_id,
@@ -472,22 +562,47 @@ def handle_run(
             on_audio=on_audio,
             on_recording_start=on_recording_start,
             on_recording_stop=on_recording_stop,
-            stop_event=loop_stop_event,
+            stop_event=loop_stop,
+            continuous_hotkey=_CONTINUOUS_HOTKEY,
+            on_continuous_toggle=continuous.request_toggle,
+            is_continuous_active=continuous.is_active,
         )
-        loop_stop_event.set()
-        watcher_thread.join(timeout=0.5)
-        if stop_event is not None and stop_event.is_set():
+
+    try:
+        # Preserve terminal Ctrl+C behavior by keeping the original direct listener
+        # path when no external stop_event is provided.
+        if stop_event is None:
+            run_loop(active_hotkey=hotkey_str, loop_stop=None)
             return
-        if not reload_requested.is_set():
-            return
-        try:
-            next_hotkey = str(get_config()["hotkey"]).strip()
-        except (ConfigError, KeyError) as e:
-            console.print(
-                f"[yellow]Hotkey reload warning:[/yellow] {e}. Keeping {active_hotkey}."
+
+        active_hotkey = hotkey_str
+        while True:
+            loop_stop_event = threading.Event()
+            reload_requested = threading.Event()
+            watcher_thread = _spawn_hotkey_reload_watcher(
+                stop_event=stop_event,
+                hotkey_str=active_hotkey,
+                loop_stop_event=loop_stop_event,
+                reload_requested=reload_requested,
             )
-            continue
-        if not next_hotkey or next_hotkey == active_hotkey:
-            continue
-        active_hotkey = next_hotkey
-        console.print(f"[cyan]Rebound hotkey:[/cyan] [bold]{active_hotkey}[/bold]")
+            run_loop(active_hotkey=active_hotkey, loop_stop=loop_stop_event)
+            loop_stop_event.set()
+            watcher_thread.join(timeout=0.5)
+            if stop_event is not None and stop_event.is_set():
+                return
+            if not reload_requested.is_set():
+                return
+            try:
+                next_hotkey = str(get_config()["hotkey"]).strip()
+            except (ConfigError, KeyError) as e:
+                console.print(
+                    f"[yellow]Hotkey reload warning:[/yellow] {e}. "
+                    f"Keeping {active_hotkey}."
+                )
+                continue
+            if not next_hotkey or next_hotkey == active_hotkey:
+                continue
+            active_hotkey = next_hotkey
+            console.print(f"[cyan]Rebound hotkey:[/cyan] [bold]{active_hotkey}[/bold]")
+    finally:
+        continuous.shutdown()

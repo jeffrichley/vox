@@ -6,7 +6,7 @@ last_updated: 2026-03-20
 
 ## Current focus
 
-- **Settings-screen follow-up watch:** Monitor shipped `vox settings` behavior for any post-ship regressions while keeping canonical docs/status surfaces aligned. Source: `.ai/PLANS/004-autosave-settings-screen.md`
+- **Settings-screen follow-up watch:** Monitor shipped `vox settings` behavior for any post-ship regressions while keeping canonical docs/status surfaces aligned.
 
 ## Recently completed
 
