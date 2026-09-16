@@ -101,7 +101,7 @@ Keep package responsibilities explicit and isolated; avoid hidden cross-coupling
 
 ## Vox-Specific Project Rules
 
-In addition to the global rules above, coding agents working in this repository must follow these Vox-specific conventions (see `AGENTS.md` for details):
+In addition to the global rules above, coding agents working in this repository must follow these Vox-specific conventions (see `CLAUDE.md` for details):
 
 - **Feature vs Internal Work Separation**
   - Keep roadmap and punchlist items split into `User-visible features` vs `Internal engineering tasks`.

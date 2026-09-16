@@ -72,7 +72,7 @@ Minimum checks:
   - verify every `just <target>` reference added/edited in this retro pass exists in `just --list`
 
 Recommended verification snippets:
-- `rg -n "\\.ai/REF/|\\.ai/COMMANDS/|\\.ai/PLANS/" .ai AGENTS.md`
+- `rg -n "\\.ai/REF/|\\.ai/COMMANDS/|\\.ai/PLANS/" .ai CLAUDE.md`
 - `test -f <path-from-reference>`
 
 ## Required Deliverables

@@ -67,7 +67,7 @@ So that <benefit/value>
   - Logging patterns and standards
 - Extract common patterns for the feature's domain
 - Document anti-patterns to avoid
-- Check `AGENTS.md` and `.ai/RULES.md` for project-specific rules and conventions
+- Check `CLAUDE.md` and `.ai/RULES.md` for project-specific rules and conventions
 
 **3. Dependency Analysis**
 
