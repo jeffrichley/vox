@@ -19,7 +19,7 @@ classifiers = [
 ]
 dependencies = [
     "av>=17.0.0",
-    "faster-whisper>=1.0.0,<2",
+    "faster-whisper>=1.2.1,<2",
     "numpy>=1.26.0",
     "pillow>=10.0.0",
     "pydantic>=2.0.0",
