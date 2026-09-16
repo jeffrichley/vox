@@ -16,7 +16,13 @@ from rich.table import Table
 from vox.audio_cues import CuePlaybackError, CuePlayer, preload_default_cues
 from vox.capture import list_devices, play_back, record_seconds
 from vox.config import ConfigError, get_config, get_transcription_options
-from vox.inject import InjectError, paste_into_focused, set_clipboard, type_into_focused
+from vox.inject import (
+    InjectError,
+    get_clipboard,
+    paste_into_focused,
+    set_clipboard,
+    type_into_focused,
+)
 from vox.transcribe import TranscriptionError, load_model, transcribe
 
 if TYPE_CHECKING:
@@ -42,6 +48,125 @@ class HotkeyModuleProtocol(Protocol):
 
 
 _HOTKEY_RELOAD_POLL_SECONDS = 0.25
+_CLIPBOARD_RESTORE_DELAY_SECONDS = 0.15
+
+
+def _pause_before_clipboard_restore() -> None:
+    """Wait briefly so the focused app can consume the pasted transcription."""
+    time.sleep(_CLIPBOARD_RESTORE_DELAY_SECONDS)
+
+
+def _snapshot_clipboard(console: Console) -> str | None:
+    """Read prior clipboard text for later restore, or None if snapshot failed.
+
+    Args:
+        console: Rich console for yellow skip warnings.
+
+    Returns:
+        Prior clipboard text, or None when the snapshot raised InjectError.
+    """
+    try:
+        return get_clipboard()
+    except InjectError as exc:
+        console.print(f"[yellow]Clipboard restore skipped:[/yellow] {exc}")
+        return None
+
+
+def _restore_clipboard(console: Console, previous: str, injected: str) -> None:
+    """Restore ``previous`` when the clipboard still holds ``injected``.
+
+    Args:
+        console: Rich console for yellow skip warnings.
+        previous: Non-empty text to put back on the clipboard.
+        injected: Transcription that was pasted; restore only while it remains.
+    """
+    try:
+        _pause_before_clipboard_restore()
+        if get_clipboard() == injected:
+            set_clipboard(previous)
+    except InjectError as exc:
+        console.print(f"[yellow]Clipboard restore skipped:[/yellow] {exc}")
+
+
+def _inject_clipboard(console: Console, text: str) -> None:
+    """Place transcribed text on the clipboard only.
+
+    Args:
+        console: Rich console for status and errors.
+        text: Transcribed text to inject.
+    """
+    try:
+        set_clipboard(text)
+    except InjectError as exc:
+        console.print(f"[red]Clipboard error:[/red] {exc}")
+        return
+    console.print("[green]Injected.[/green]")
+
+
+def _inject_clipboard_and_paste(console: Console, text: str) -> None:
+    """Paste transcription, then restore the prior clipboard when safe.
+
+    Args:
+        console: Rich console for status and errors.
+        text: Transcribed text to inject.
+    """
+    previous = _snapshot_clipboard(console)
+    try:
+        set_clipboard(text)
+    except InjectError as exc:
+        console.print(f"[red]Clipboard error:[/red] {exc}")
+        return
+    paste_ok = True
+    try:
+        paste_into_focused()
+    except InjectError as exc:
+        console.print(f"[yellow]Paste failed:[/yellow] {exc}")
+        paste_ok = False
+    if paste_ok and previous:
+        _restore_clipboard(console, previous, text)
+    console.print("[green]Injected.[/green]")
+
+
+def _inject_type(console: Console, text: str) -> None:
+    """Type transcribed text into the focused window.
+
+    Args:
+        console: Rich console for status and errors.
+        text: Transcribed text to inject.
+    """
+    try:
+        type_into_focused(text)
+    except InjectError as exc:
+        console.print(f"[red]Typing error:[/red] {exc}")
+        return
+    console.print("[green]Injected.[/green]")
+
+
+_INJECTORS: dict[str, Callable[[Console, str], None]] = {
+    "clipboard": _inject_clipboard,
+    "clipboard_and_paste": _inject_clipboard_and_paste,
+    "type": _inject_type,
+}
+
+
+def _resolve_injector(injection_mode: str) -> Callable[[Console, str], None]:
+    """Return the injector for ``injection_mode`` or fail fast.
+
+    Args:
+        injection_mode: Configured injection mode name.
+
+    Returns:
+        Injector callable taking ``(console, text)``.
+
+    Raises:
+        ConfigError: If ``injection_mode`` is not a supported value.
+    """
+    try:
+        return _INJECTORS[injection_mode]
+    except KeyError as exc:
+        raise ConfigError(
+            f"injection_mode: unsupported value {injection_mode!r}"
+        ) from exc
 
 
 def _run_push_to_talk_loop(  # noqa: PLR0913
@@ -245,9 +370,10 @@ def _build_audio_handler(
     Returns:
         Audio callback passed into the push-to-talk loop.
     """
+    injector = _resolve_injector(injection_mode)
 
     def on_audio(audio_buffer: np.ndarray) -> None:
-        """Transcribe buffer, set clipboard, optionally paste into focused window.
+        """Transcribe buffer and inject text via the resolved injector.
 
         Args:
             audio_buffer: Recorded float32 mono audio (e.g. from record_until_stop).
@@ -260,25 +386,7 @@ def _build_audio_handler(
         if not text.strip():
             console.print("[dim]No speech detected.[/dim]")
             return
-        if injection_mode == "type":
-            try:
-                type_into_focused(text)
-            except InjectError as e:
-                console.print(f"[red]Typing error:[/red] {e}")
-                return
-            console.print("[green]Injected.[/green]")
-            return
-        try:
-            set_clipboard(text)
-        except InjectError as e:
-            console.print(f"[red]Clipboard error:[/red] {e}")
-            return
-        if injection_mode == "clipboard_and_paste":
-            try:
-                paste_into_focused()
-            except InjectError as e:
-                console.print(f"[yellow]Paste failed:[/yellow] {e}")
-        console.print("[green]Injected.[/green]")
+        injector(console, text)
 
     return on_audio
 

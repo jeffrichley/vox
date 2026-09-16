@@ -7,7 +7,13 @@ from unittest import mock
 import pyperclip
 import pytest
 
-from vox.inject import InjectError, paste_into_focused, set_clipboard, type_into_focused
+from vox.inject import (
+    InjectError,
+    get_clipboard,
+    paste_into_focused,
+    set_clipboard,
+    type_into_focused,
+)
 
 
 @pytest.mark.unit
@@ -44,6 +50,42 @@ class TestSetClipboard:
             # Assert - InjectError with hint containing 'clipboard'
             with pytest.raises(InjectError, match="clipboard"):
                 set_clipboard("x")
+
+
+@pytest.mark.unit
+class TestGetClipboard:
+    """get_clipboard reads system clipboard and raises on failure."""
+
+    def test_returns_pyperclip_paste_value(self) -> None:
+        """get_clipboard returns the string from pyperclip.paste."""
+        # Arrange - paste returns prior text
+        with mock.patch("vox.inject.clipboard.pyperclip") as m_pyperclip:
+            m_pyperclip.paste.return_value = "prior text"
+            # Act - read clipboard
+            result = get_clipboard()
+            # Assert - exact paste value returned
+            assert result == "prior text"
+            m_pyperclip.paste.assert_called_once_with()
+
+    def test_non_string_paste_becomes_empty(self) -> None:
+        """Non-str paste results are treated as empty (non-text clipboard)."""
+        # Arrange - paste returns a non-string
+        with mock.patch("vox.inject.clipboard.pyperclip") as m_pyperclip:
+            m_pyperclip.paste.return_value = None
+            # Act - read clipboard
+            result = get_clipboard()
+            # Assert - empty string for non-text
+            assert result == ""
+
+    def test_pyperclip_failure_raises_inject_error(self) -> None:
+        """PyperclipException is wrapped in InjectError with a read failure message."""
+        # Arrange - paste raises
+        with mock.patch("vox.inject.clipboard.pyperclip.paste") as m_paste:
+            m_paste.side_effect = pyperclip.PyperclipException("no display")
+            # Act - read clipboard
+            # Assert - InjectError mentions clipboard read
+            with pytest.raises(InjectError, match=r"(?i)clipboard"):
+                get_clipboard()
 
 
 @pytest.mark.unit
