@@ -32,3 +32,27 @@ def set_clipboard(text: str) -> None:
             f"Failed to set clipboard: {e}. "
             "On Linux install xclip or xsel; on headless/servers use a display or mock."
         ) from e
+
+
+def get_clipboard() -> str:
+    """Return the current system clipboard text.
+
+    Non-text clipboard contents are treated as empty (``""``). Restoring an
+    empty snapshot is skipped by callers so EmptyClipboard is not triggered.
+
+    Returns:
+        Clipboard text, or ``""`` when empty or non-text.
+
+    Raises:
+        InjectError: If clipboard access fails, with an actionable message.
+    """
+    try:
+        value = pyperclip.paste()
+    except pyperclip.PyperclipException as e:
+        raise InjectError(
+            f"Failed to read clipboard: {e}. "
+            "On Linux install xclip or xsel; on headless/servers use a display or mock."
+        ) from e
+    if not isinstance(value, str):
+        return ""
+    return value

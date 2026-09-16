@@ -94,11 +94,11 @@ jobs:
 
       - name: Build (PyInstaller onedir) (Windows / macOS)
         if: matrix.platform != 'linux'
-        run: uv run pyinstaller --onedir --noconfirm --name vox --paths src --collect-all vox src/vox/__main__.py
+        run: uv run pyinstaller --onedir --noconfirm --name vox --paths src --collect-all vox --collect-data faster_whisper src/vox/__main__.py
 
       - name: Build (PyInstaller onedir) (Linux)
         if: matrix.platform == 'linux'
-        run: xvfb-run -a uv run pyinstaller --onedir --noconfirm --name vox --paths src --collect-all vox src/vox/__main__.py
+        run: xvfb-run -a uv run pyinstaller --onedir --noconfirm --name vox --paths src --collect-all vox --collect-data faster_whisper src/vox/__main__.py
 
       - name: Smoke test (Windows)
         if: matrix.platform == 'windows'
