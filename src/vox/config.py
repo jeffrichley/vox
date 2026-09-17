@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import tempfile
 
@@ -168,7 +169,27 @@ _ENV_OVERRIDES: list[tuple[str, str, bool]] = [
     ("VOX_COMPUTE_TYPE", "compute_type", True),
     ("VOX_COMPUTE_DEVICE", "compute_device", True),
     ("VOX_INJECTION_MODE", "injection_mode", True),
+    ("VOX_CONTINUOUS_HOTKEY", "continuous_hotkey", True),
 ]
+
+# Table-driven float env overrides shared by cue_volume and Continuous Pause.
+_FLOAT_ENV_OVERRIDES: list[tuple[str, str]] = [
+    ("VOX_CUE_VOLUME", "cue_volume"),
+    ("VOX_CONTINUOUS_PAUSE_SECONDS", "continuous_pause_seconds"),
+]
+
+_HOTKEY_MODIFIER_ALIASES: dict[str, str] = {
+    "control": "ctrl",
+    "ctrl": "ctrl",
+    "shift": "shift",
+    "alt": "alt",
+    "cmd": "cmd",
+    "meta": "cmd",
+    "win": "cmd",
+}
+
+DEFAULT_CONTINUOUS_HOTKEY = "ctrl+alt+space"
+DEFAULT_CONTINUOUS_PAUSE_SECONDS = 1.0
 
 
 def _apply_device_id_env(raw: dict[str, Any]) -> None:
@@ -197,19 +218,23 @@ def _apply_use_tray_env(raw: dict[str, Any]) -> None:
     raw["use_tray"] = v in ("1", "true", "yes")
 
 
-def _apply_cue_volume_env(raw: dict[str, Any]) -> None:
-    """Set raw['cue_volume'] from VOX_CUE_VOLUME if set.
+def _apply_float_env_overrides(raw: dict[str, Any]) -> None:
+    """Apply table-driven float env overrides (cue_volume, Continuous Pause).
+
+    Invalid floats are left as the raw string so validate_config can reject them
+    with a field-specific error (no silent defaults).
 
     Args:
         raw: Config dict to update in place.
     """
-    if "VOX_CUE_VOLUME" not in os.environ:
-        return
-    value = os.environ["VOX_CUE_VOLUME"].strip()
-    try:
-        raw["cue_volume"] = float(value)
-    except ValueError:
-        raw["cue_volume"] = value
+    for env_key, config_key in _FLOAT_ENV_OVERRIDES:
+        if env_key not in os.environ:
+            continue
+        value = os.environ[env_key].strip()
+        try:
+            raw[config_key] = float(value)
+        except ValueError:
+            raw[config_key] = value
 
 
 def _apply_env_overrides(raw: dict[str, Any]) -> None:
@@ -223,7 +248,7 @@ def _apply_env_overrides(raw: dict[str, Any]) -> None:
             raw[key] = os.environ[env_key].strip() if strip else os.environ[env_key]
     _apply_device_id_env(raw)
     _apply_use_tray_env(raw)
-    _apply_cue_volume_env(raw)
+    _apply_float_env_overrides(raw)
 
 
 _CONFIG_KEYS = (
@@ -235,6 +260,8 @@ _CONFIG_KEYS = (
     "injection_mode",
     "cue_volume",
     "use_tray",
+    "continuous_hotkey",
+    "continuous_pause_seconds",
 )
 
 type TomlScalar = str | int | float | bool
@@ -411,12 +438,84 @@ def _validate_cue_volume(raw: dict[str, Any]) -> None:
         raise ValueError("cue_volume: must be between 0.0 and 1.0")
 
 
+def _validate_continuous_pause_seconds(raw: dict[str, Any]) -> None:
+    """Raise if continuous_pause_seconds is present and not a finite number > 0.
+
+    Args:
+        raw: Config dict to validate.
+
+    Raises:
+        ValueError: If continuous_pause_seconds is present and invalid.
+    """
+    if "continuous_pause_seconds" not in raw or raw["continuous_pause_seconds"] is None:
+        return
+    value = raw["continuous_pause_seconds"]
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise ValueError(
+            "continuous_pause_seconds: must be a finite number greater than 0"
+        )
+    pause = float(value)
+    if not math.isfinite(pause) or pause <= 0:
+        raise ValueError(
+            "continuous_pause_seconds: must be a finite number greater than 0"
+        )
+
+
+def _normalize_hotkey_combo(hotkey_str: str) -> tuple[frozenset[str], str]:
+    """Normalize a hotkey string for collision comparison (no keyboard lib).
+
+    Lowercases tokens, maps control→ctrl and meta/win→cmd, and ignores
+    modifier order.
+
+    Args:
+        hotkey_str: Combination like ``ctrl+alt+space`` or ``control+win+v``.
+
+    Returns:
+        ``(modifiers, trigger)`` after alias normalization.
+    """
+    parts = [p.strip().lower() for p in hotkey_str.split("+") if p.strip()]
+    modifiers: set[str] = set()
+    trigger = ""
+    for part in parts:
+        alias = _HOTKEY_MODIFIER_ALIASES.get(part)
+        if alias is not None:
+            modifiers.add(alias)
+        else:
+            trigger = part
+    return frozenset(modifiers), trigger
+
+
+def _validate_hotkey_collision(raw: dict[str, Any]) -> None:
+    """Raise if Push-to-talk and Continuous hotkeys collide after normalization.
+
+    Args:
+        raw: Config dict to validate.
+
+    Raises:
+        ValueError: If the two hotkeys match after alias/order normalization.
+    """
+    push_to_talk = raw.get("hotkey")
+    if not isinstance(push_to_talk, str) or not push_to_talk.strip():
+        return
+    continuous = raw.get("continuous_hotkey")
+    if continuous is None:
+        continuous = DEFAULT_CONTINUOUS_HOTKEY
+    if not isinstance(continuous, str) or not continuous.strip():
+        return
+    if _normalize_hotkey_combo(push_to_talk) == _normalize_hotkey_combo(continuous):
+        raise ValueError(
+            "continuous_hotkey: must differ from hotkey "
+            "(modifier order and aliases like control/ctrl, win/cmd ignored); "
+            "change continuous_hotkey"
+        )
+
+
 def validate_config(raw: dict[str, Any]) -> None:
     """Validate required and optional fields; raise ValueError with field name.
 
     Required: hotkey (non-empty string).
     Optional: device_id (int or None), use_tray (bool), model_size, compute_type,
-    compute_device, injection_mode.
+    compute_device, injection_mode, continuous_hotkey, continuous_pause_seconds.
     No silent fallbacks for required fields.
 
     Args:
@@ -434,6 +533,9 @@ def validate_config(raw: dict[str, Any]) -> None:
         _validate_optional_str(raw, "compute_device")
         _validate_injection_mode(raw)
         _validate_cue_volume(raw)
+        _validate_optional_str(raw, "continuous_hotkey")
+        _validate_continuous_pause_seconds(raw)
+        _validate_hotkey_collision(raw)
     except ValueError as e:
         raise ConfigError(str(e)) from e
 
@@ -702,8 +804,13 @@ def get_env_override_fields() -> dict[str, str]:
         overrides["device_id"] = "VOX_DEVICE_ID"
     if "VOX_TRAY" in os.environ:
         overrides["use_tray"] = "VOX_TRAY"
-    if "VOX_CUE_VOLUME" in os.environ:
-        overrides["cue_volume"] = "VOX_CUE_VOLUME"
+    overrides.update(
+        {
+            config_key: env_key
+            for env_key, config_key in _FLOAT_ENV_OVERRIDES
+            if env_key in os.environ
+        }
+    )
     return overrides
 
 
@@ -712,7 +819,7 @@ def get_config() -> dict[str, Any]:
 
     Returns:
         Dict with hotkey, device_id, model_size, compute_type, compute_device,
-        injection_mode, cue_volume.
+        injection_mode, cue_volume, continuous_hotkey, continuous_pause_seconds.
 
     Raises:
         ConfigError: When a required field is missing or invalid.
@@ -731,5 +838,11 @@ def get_config() -> dict[str, Any]:
         "injection_mode": _str_default(raw, "injection_mode", "clipboard"),
         "cue_volume": _float_default(raw, "cue_volume", 0.5),
         "use_tray": _bool_default(raw, "use_tray", False),
+        "continuous_hotkey": _str_default(
+            raw, "continuous_hotkey", DEFAULT_CONTINUOUS_HOTKEY
+        ),
+        "continuous_pause_seconds": _float_default(
+            raw, "continuous_pause_seconds", DEFAULT_CONTINUOUS_PAUSE_SECONDS
+        ),
     }
     return out

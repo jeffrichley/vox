@@ -601,10 +601,11 @@ class TestHandleRun:
             *,
             stop_event: threading.Event | None,
             hotkey_str: str,
+            continuous_hotkey_str: str,
             loop_stop_event: threading.Event,
             reload_requested: threading.Event,
         ) -> threading.Thread:
-            _ = hotkey_str
+            _ = (hotkey_str, continuous_hotkey_str)
             nonlocal watcher_calls
             watcher_calls += 1
 
@@ -640,6 +641,8 @@ class TestHandleRun:
                     "compute_type": "float32",
                     "compute_device": "cpu",
                     "injection_mode": "clipboard",
+                    "continuous_hotkey": "ctrl+alt+space",
+                    "continuous_pause_seconds": 1.0,
                 },
                 {
                     "hotkey": "ctrl+f2",
@@ -648,6 +651,8 @@ class TestHandleRun:
                     "compute_type": "float32",
                     "compute_device": "cpu",
                     "injection_mode": "clipboard",
+                    "continuous_hotkey": "ctrl+alt+space",
+                    "continuous_pause_seconds": 1.0,
                 },
             ]
 

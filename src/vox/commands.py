@@ -20,7 +20,13 @@ from vox.capture import (
     record_seconds,
     start_framed_input_stream,
 )
-from vox.config import ConfigError, get_config, get_transcription_options
+from vox.config import (
+    DEFAULT_CONTINUOUS_HOTKEY,
+    DEFAULT_CONTINUOUS_PAUSE_SECONDS,
+    ConfigError,
+    get_config,
+    get_transcription_options,
+)
 from vox.continuous.session import ContinuousSession
 from vox.continuous.vad import FRAME_SAMPLES, load_streaming_vad
 from vox.inject import (
@@ -34,8 +40,6 @@ from vox.transcribe import TranscriptionError, load_model, transcribe
 
 if TYPE_CHECKING:
     from faster_whisper import WhisperModel  # type: ignore[import-untyped]
-
-_CONTINUOUS_HOTKEY = "ctrl+alt+d"
 
 
 class HotkeyModuleProtocol(Protocol):
@@ -214,6 +218,7 @@ def _spawn_hotkey_reload_watcher(
     *,
     stop_event: threading.Event | None,
     hotkey_str: str,
+    continuous_hotkey_str: str,
     loop_stop_event: threading.Event,
     reload_requested: threading.Event,
 ) -> threading.Thread:
@@ -221,7 +226,8 @@ def _spawn_hotkey_reload_watcher(
 
     Args:
         stop_event: Optional external stop signal from runtime surfaces.
-        hotkey_str: Currently active hotkey string bound by the listener loop.
+        hotkey_str: Currently active Push-to-talk hotkey string.
+        continuous_hotkey_str: Currently active Continuous dictation hotkey.
         loop_stop_event: Internal stop signal for the current listener iteration.
         reload_requested: Signal set when a hotkey change requires loop restart.
 
@@ -230,16 +236,23 @@ def _spawn_hotkey_reload_watcher(
     """
 
     def watch_hotkey() -> None:
-        """Poll config hotkey and request listener-loop restart when changed."""
+        """Poll config hotkeys and request listener-loop restart when changed."""
         while not loop_stop_event.is_set():
             if stop_event is not None and stop_event.is_set():
                 loop_stop_event.set()
                 return
             try:
-                current_hotkey = str(get_config()["hotkey"]).strip()
+                cfg = get_config()
+                current_hotkey = str(cfg["hotkey"]).strip()
+                current_continuous = str(
+                    cfg.get("continuous_hotkey", DEFAULT_CONTINUOUS_HOTKEY)
+                ).strip()
             except (ConfigError, KeyError):
                 current_hotkey = hotkey_str
-            if current_hotkey and current_hotkey != hotkey_str:
+                current_continuous = continuous_hotkey_str
+            if (current_hotkey and current_hotkey != hotkey_str) or (
+                current_continuous and current_continuous != continuous_hotkey_str
+            ):
                 reload_requested.set()
                 loop_stop_event.set()
                 return
@@ -406,6 +419,7 @@ def _build_continuous_session(  # noqa: PLR0913
     channels: int,
     on_recording_start: Callable[[], None],
     on_recording_stop: Callable[[], None],
+    pause_seconds: float = DEFAULT_CONTINUOUS_PAUSE_SECONDS,
 ) -> ContinuousSession:
     """Build the Continuous dictation session for one ``handle_run`` lifetime.
 
@@ -418,6 +432,7 @@ def _build_continuous_session(  # noqa: PLR0913
         channels: Capture channel count.
         on_recording_start: Start cue callback reused as Continuous start cue.
         on_recording_stop: End cue callback reused as Continuous end cue.
+        pause_seconds: Trailing silence that ends an Utterance.
 
     Returns:
         Idle ContinuousSession (no stream/VAD until first toggle-on).
@@ -478,7 +493,70 @@ def _build_continuous_session(  # noqa: PLR0913
         play_start=on_recording_start,
         play_end=on_recording_stop,
         reporter=reporter,
+        pause_seconds=pause_seconds,
     )
+
+
+def _read_reload_hotkeys(
+    console: Console,
+    *,
+    active_hotkey: str,
+    active_continuous_hotkey: str,
+) -> tuple[str, str] | None:
+    """Load next Push-to-talk / Continuous hotkeys after a reload request.
+
+    Args:
+        console: Rich console for warning output.
+        active_hotkey: Currently bound Push-to-talk hotkey.
+        active_continuous_hotkey: Currently bound Continuous hotkey.
+
+    Returns:
+        ``(next_hotkey, next_continuous)`` or None when config reload fails.
+    """
+    try:
+        next_cfg = get_config()
+        return (
+            str(next_cfg["hotkey"]).strip(),
+            str(next_cfg.get("continuous_hotkey", DEFAULT_CONTINUOUS_HOTKEY)).strip(),
+        )
+    except (ConfigError, KeyError) as e:
+        console.print(
+            f"[yellow]Hotkey reload warning:[/yellow] {e}. "
+            f"Keeping {active_hotkey} / {active_continuous_hotkey}."
+        )
+        return None
+
+
+def _announce_hotkey_rebinds(
+    console: Console,
+    *,
+    active_hotkey: str,
+    active_continuous_hotkey: str,
+    next_hotkey: str,
+    next_continuous: str,
+) -> tuple[str, str]:
+    """Print rebind messages and return the updated active hotkey pair.
+
+    Args:
+        console: Rich console for rebind messages.
+        active_hotkey: Currently bound Push-to-talk hotkey.
+        active_continuous_hotkey: Currently bound Continuous hotkey.
+        next_hotkey: Newly loaded Push-to-talk hotkey.
+        next_continuous: Newly loaded Continuous hotkey.
+
+    Returns:
+        Updated ``(active_hotkey, active_continuous_hotkey)``.
+    """
+    if next_hotkey and next_hotkey != active_hotkey:
+        active_hotkey = next_hotkey
+        console.print(f"[cyan]Rebound hotkey:[/cyan] [bold]{active_hotkey}[/bold]")
+    if next_continuous and next_continuous != active_continuous_hotkey:
+        active_continuous_hotkey = next_continuous
+        console.print(
+            "[cyan]Rebound continuous hotkey:[/cyan] "
+            f"[bold]{active_continuous_hotkey}[/bold]"
+        )
+    return active_hotkey, active_continuous_hotkey
 
 
 def handle_run(
@@ -489,7 +567,7 @@ def handle_run(
 
     Loads config from ~/.vox/vox.toml (or VOX_CONFIG). On each push-to-talk
     hotkey release, recorded audio is transcribed and Injected. Continuous
-    dictation is toggled with ``ctrl+alt+d`` and Commits on Pause.
+    dictation is toggled with ``continuous_hotkey`` and Commits on Pause.
     Runs until stopped (KeyboardInterrupt or stop_event set).
 
     Args:
@@ -504,6 +582,12 @@ def handle_run(
     compute_device = cfg.get("compute_device", "cpu")
     injection_mode = cfg.get("injection_mode", "clipboard")
     cue_volume = cfg.get("cue_volume", 0.5)
+    continuous_hotkey = str(
+        cfg.get("continuous_hotkey", DEFAULT_CONTINUOUS_HOTKEY)
+    ).strip()
+    pause_seconds = float(
+        cfg.get("continuous_pause_seconds", DEFAULT_CONTINUOUS_PAUSE_SECONDS)
+    )
 
     model = load_model(
         model_size_or_path=model_size,
@@ -529,6 +613,7 @@ def handle_run(
         channels,
         on_recording_start,
         on_recording_stop,
+        pause_seconds=pause_seconds,
     )
     continuous.start()
 
@@ -536,8 +621,8 @@ def handle_run(
         Panel(
             f"Push-to-talk: [bold]{hotkey_str}[/bold] "
             "(hold to record, release to transcribe and inject)\n"
-            f"Continuous dictation: [bold]{_CONTINUOUS_HOTKEY}[/bold] "
-            "(tap to toggle; Commits on Pause)\n"
+            f"Continuous dictation: [bold]{continuous_hotkey}[/bold] "
+            f"(tap to toggle; Commits after {pause_seconds:g}s Pause)\n"
             "Press Ctrl+C to exit.",
             title="Vox",
         )
@@ -546,12 +631,14 @@ def handle_run(
     def run_loop(
         *,
         active_hotkey: str,
+        active_continuous_hotkey: str,
         loop_stop: threading.Event | None,
     ) -> None:
         """Run one hotkey listener pass with Continuous toggle wired in.
 
         Args:
             active_hotkey: Push-to-talk hotkey for this listener pass.
+            active_continuous_hotkey: Continuous dictation toggle hotkey.
             loop_stop: Optional stop event for reload or external quit.
         """
         _run_push_to_talk_loop(
@@ -563,46 +650,54 @@ def handle_run(
             on_recording_start=on_recording_start,
             on_recording_stop=on_recording_stop,
             stop_event=loop_stop,
-            continuous_hotkey=_CONTINUOUS_HOTKEY,
+            continuous_hotkey=active_continuous_hotkey,
             on_continuous_toggle=continuous.request_toggle,
             is_continuous_active=continuous.is_active,
         )
 
     try:
-        # Preserve terminal Ctrl+C behavior by keeping the original direct listener
-        # path when no external stop_event is provided.
         if stop_event is None:
-            run_loop(active_hotkey=hotkey_str, loop_stop=None)
+            run_loop(
+                active_hotkey=hotkey_str,
+                active_continuous_hotkey=continuous_hotkey,
+                loop_stop=None,
+            )
             return
 
         active_hotkey = hotkey_str
+        active_continuous_hotkey = continuous_hotkey
         while True:
             loop_stop_event = threading.Event()
             reload_requested = threading.Event()
             watcher_thread = _spawn_hotkey_reload_watcher(
                 stop_event=stop_event,
                 hotkey_str=active_hotkey,
+                continuous_hotkey_str=active_continuous_hotkey,
                 loop_stop_event=loop_stop_event,
                 reload_requested=reload_requested,
             )
-            run_loop(active_hotkey=active_hotkey, loop_stop=loop_stop_event)
+            run_loop(
+                active_hotkey=active_hotkey,
+                active_continuous_hotkey=active_continuous_hotkey,
+                loop_stop=loop_stop_event,
+            )
             loop_stop_event.set()
             watcher_thread.join(timeout=0.5)
-            if stop_event is not None and stop_event.is_set():
+            if stop_event.is_set() or not reload_requested.is_set():
                 return
-            if not reload_requested.is_set():
-                return
-            try:
-                next_hotkey = str(get_config()["hotkey"]).strip()
-            except (ConfigError, KeyError) as e:
-                console.print(
-                    f"[yellow]Hotkey reload warning:[/yellow] {e}. "
-                    f"Keeping {active_hotkey}."
-                )
+            next_keys = _read_reload_hotkeys(
+                console,
+                active_hotkey=active_hotkey,
+                active_continuous_hotkey=active_continuous_hotkey,
+            )
+            if next_keys is None:
                 continue
-            if not next_hotkey or next_hotkey == active_hotkey:
-                continue
-            active_hotkey = next_hotkey
-            console.print(f"[cyan]Rebound hotkey:[/cyan] [bold]{active_hotkey}[/bold]")
+            active_hotkey, active_continuous_hotkey = _announce_hotkey_rebinds(
+                console,
+                active_hotkey=active_hotkey,
+                active_continuous_hotkey=active_continuous_hotkey,
+                next_hotkey=next_keys[0],
+                next_continuous=next_keys[1],
+            )
     finally:
         continuous.shutdown()
