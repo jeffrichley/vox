@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -17,7 +18,22 @@ _SILENCE_THRESHOLD = 0.35
 _PAUSE_SECONDS = 1.0
 _PREROLL_SECONDS = 0.4
 _IDLE_MINUTES = 5.0
+_MIC_STALL_SECONDS = 2.0
+_MIC_STALL_MESSAGE = "Microphone stopped delivering audio."
 _TRAILING_SPACE = " "
+
+
+@dataclass(frozen=True)
+class ContinuousState:
+    """Published Continuous dictation state for UI and notifications.
+
+    Attributes:
+        active: Whether Continuous dictation is currently listening.
+        error: Optional failure message; None when there is no error.
+    """
+
+    active: bool
+    error: str | None = None
 
 
 @dataclass
@@ -104,7 +120,7 @@ class ContinuousSession:
     created before the first toggle-on.
     """
 
-    def __init__(  # noqa: PLR0913
+    def __init__(  # noqa: PLR0913 — injected Continuous collaborators exceed 5 by design
         self,
         *,
         stream_starter: Callable[
@@ -117,10 +133,13 @@ class ContinuousSession:
         play_start: Callable[[], None],
         play_end: Callable[[], None],
         reporter: Callable[[str], None] | None = None,
-        state_publisher: Callable[[bool], None] | None = None,
+        state_publisher: Callable[[ContinuousState], None] | None = None,
+        start_refusal: Callable[[], str | None] | None = None,
         pause_seconds: float = _PAUSE_SECONDS,
         idle_minutes: float = _IDLE_MINUTES,
         on_idle_auto_off: Callable[[float], None] | None = None,
+        clock: Callable[[], float] | None = None,
+        mic_stall_seconds: float = _MIC_STALL_SECONDS,
     ) -> None:
         """Create an idle session; call ``start`` before toggling.
 
@@ -132,10 +151,13 @@ class ContinuousSession:
             play_start: Start cue (toggle-on).
             play_end: End cue (toggle-off).
             reporter: Optional error/status reporter.
-            state_publisher: Optional active-state publisher.
+            state_publisher: Optional publisher of active flag plus error.
+            start_refusal: Optional gate; return a message to refuse toggle-on.
             pause_seconds: Trailing silence that ends an Utterance (must be > 0).
             idle_minutes: Silence minutes before auto-off (must be > 0).
             on_idle_auto_off: Optional callback with configured idle minutes.
+            clock: Monotonic clock for mic-stall detection (tests inject a fake).
+            mic_stall_seconds: No-audio seconds before mic-failure shutdown.
         """
         self._stream_starter = stream_starter
         self._speech_detector_factory = speech_detector_factory
@@ -145,9 +167,12 @@ class ContinuousSession:
         self._play_end = play_end
         self._reporter = reporter
         self._state_publisher = state_publisher
+        self._start_refusal = start_refusal
         self._idle_minutes = idle_minutes
         self._idle_limit_samples = int(idle_minutes * 60.0 * _SAMPLE_RATE)
         self._on_idle_auto_off = on_idle_auto_off
+        self._clock = clock if clock is not None else time.monotonic
+        self._mic_stall_seconds = mic_stall_seconds
 
         self._lock = threading.Lock()
         self._active = False
@@ -163,6 +188,8 @@ class ContinuousSession:
         self._commit_event = threading.Event()
         self._commit_thread: threading.Thread | None = None
         self._commits_done = threading.Condition()
+        self._last_audio_at: float | None = None
+        self._mic_failure = False
 
     def start(self) -> None:
         """Start the FIFO Commit worker; listening begins on first toggle-on."""
@@ -189,26 +216,35 @@ class ContinuousSession:
 
     def request_toggle(self) -> None:
         """Toggle listening on or off without blocking the caller."""
+        start_failure: str | None = None
         with self._lock:
             if self._shutting_down or not self._started:
                 return
             if self._active:
                 self._listen_stop.set()
                 return
-            self._active = True
-            self._listen_stop = threading.Event()
-            self._pause.reset()
-            self._idle_samples = 0
-            self._idle_off_requested = False
-            stop_event = self._listen_stop
-            self._listen_thread = threading.Thread(
-                target=self._listen_loop,
-                args=(stop_event,),
-                name="vox-continuous-listen",
-                daemon=True,
-            )
-            self._listen_thread.start()
-        self._publish(True)
+            refusal = self._start_refusal() if self._start_refusal is not None else None
+            if refusal is not None:
+                start_failure = refusal
+            else:
+                self._mic_failure = False
+                self._listen_stop = threading.Event()
+                self._pause.reset()
+                self._idle_samples = 0
+                self._idle_off_requested = False
+                self._last_audio_at = None
+                stop_event = self._listen_stop
+                self._listen_thread = threading.Thread(
+                    target=self._listen_loop,
+                    args=(stop_event,),
+                    name="vox-continuous-listen",
+                    daemon=True,
+                )
+                self._listen_thread.start()
+        if start_failure is not None:
+            self._report(start_failure)
+            self._safe_cue(self._play_end)
+            self._publish(ContinuousState(active=False, error=start_failure))
 
     def ingest_frame(self, frame: np.ndarray) -> None:
         """Process one 512-sample frame (test seam and stream callback).
@@ -220,6 +256,7 @@ class ContinuousSession:
             if not self._active or self._detector is None:
                 return
             detector = self._detector
+            self._last_audio_at = self._clock()
         flat = np.asarray(frame, dtype=np.float32).reshape(-1)
         if flat.size != FRAME_SAMPLES:
             if flat.size > FRAME_SAMPLES:
@@ -257,7 +294,10 @@ class ContinuousSession:
             self._idle_off_requested = True
             self._listen_stop.set()
         if self._on_idle_auto_off is not None:
-            self._on_idle_auto_off(self._idle_minutes)
+            try:
+                self._on_idle_auto_off(self._idle_minutes)
+            except Exception as exc:
+                self._report(str(exc))
 
     def shutdown(self) -> None:
         """Stop listening, drain Commits, and tear down workers. Idempotent."""
@@ -271,7 +311,7 @@ class ContinuousSession:
         if was_active and listen_thread is not None:
             listen_thread.join(timeout=5.0)
             # listen_loop skips end cue when shutting down; play it here.
-            self._play_end()
+            self._safe_cue(self._play_end)
         with self._lock:
             self._active = False
             self._enqueue_sentinel()
@@ -283,34 +323,80 @@ class ContinuousSession:
             self._listen_thread = None
             self._started = False
             self._detector = None
-        self._publish(False)
+        self._publish(ContinuousState(active=False, error=None))
 
     def _listen_loop(self, stop_event: threading.Event) -> None:
-        """Create detector, play start cue, run stream until stop.
+        """Create detector, announce listening, run stream until stop.
 
         Args:
             stop_event: Set by toggle-off or shutdown to end the stream.
         """
+        start_error: str | None = None
+        stall_thread: threading.Thread | None = None
         try:
             detector = self._speech_detector_factory()
             with self._lock:
+                if self._shutting_down or stop_event.is_set():
+                    return
                 self._detector = detector
-            self._play_start()
+                self._active = True
+            self._safe_cue(self._play_start)
+            self._publish(ContinuousState(active=True, error=None))
+            stall_thread = threading.Thread(
+                target=self._mic_stall_watch,
+                args=(stop_event,),
+                name="vox-continuous-mic-stall",
+                daemon=True,
+            )
+            stall_thread.start()
             self._stream_starter(self.ingest_frame, stop_event)
         except Exception as exc:
-            if self._reporter is not None:
-                self._reporter(str(exc))
+            start_error = str(exc)
+            self._report(start_error)
         finally:
             pending = self._pause.flush_pending()
             if pending is not None and pending.size > 0:
                 self._enqueue_commit(pending)
             with self._lock:
-                play_end = self._active and not self._shutting_down
+                mic_failure = self._mic_failure
+                shutting_down = self._shutting_down
                 self._active = False
                 self._detector = None
-            if play_end:
-                self._play_end()
-                self._publish(False)
+            if stall_thread is not None:
+                stall_thread.join(timeout=1.0)
+            if not shutting_down:
+                self._safe_cue(self._play_end)
+                error: str | None = None
+                if mic_failure:
+                    error = _MIC_STALL_MESSAGE
+                elif start_error is not None:
+                    error = start_error
+                self._publish(ContinuousState(active=False, error=error))
+
+    def _mic_stall_watch(self, stop_event: threading.Event) -> None:
+        """Turn Continuous off when no audio frames arrive for too long.
+
+        Args:
+            stop_event: Listening stop event shared with the stream.
+        """
+        while not stop_event.wait(timeout=0.05):
+            with self._lock:
+                if (
+                    not self._active
+                    or self._shutting_down
+                    or self._mic_failure
+                    or self._last_audio_at is None
+                ):
+                    continue
+                stalled = (
+                    self._clock() - self._last_audio_at
+                ) >= self._mic_stall_seconds
+                if not stalled:
+                    continue
+                self._mic_failure = True
+                self._listen_stop.set()
+            self._report(_MIC_STALL_MESSAGE)
+            return
 
     def _enqueue_commit(self, audio: np.ndarray) -> None:
         """Enqueue utterance audio for the FIFO Commit worker.
@@ -343,20 +429,51 @@ class ContinuousSession:
                 try:
                     text = self._transcriber(item)
                 except Exception as exc:
-                    if self._reporter is not None:
-                        self._reporter(str(exc))
+                    self._report(str(exc))
                     continue
                 if not text.strip():
                     continue
-                self._deliverer(
+                delivery = (
                     text if text.endswith(_TRAILING_SPACE) else text + _TRAILING_SPACE
                 )
+                try:
+                    self._deliverer(delivery)
+                except Exception as exc:
+                    self._report(str(exc))
 
-    def _publish(self, active: bool) -> None:
-        """Publish active state when a publisher is configured.
+    def _report(self, message: str) -> None:
+        """Report a failure without raising.
 
         Args:
-            active: Whether Continuous dictation is listening.
+            message: User-facing error detail.
         """
-        if self._state_publisher is not None:
-            self._state_publisher(active)
+        if self._reporter is None:
+            return
+        try:
+            self._reporter(message)
+        except Exception:
+            return
+
+    def _safe_cue(self, play: Callable[[], None]) -> None:
+        """Play a cue; report exceptions without killing the session.
+
+        Args:
+            play: Start or end cue callback.
+        """
+        try:
+            play()
+        except Exception as exc:
+            self._report(str(exc))
+
+    def _publish(self, state: ContinuousState) -> None:
+        """Publish active/error state when a publisher is configured.
+
+        Args:
+            state: Latest Continuous dictation state.
+        """
+        if self._state_publisher is None:
+            return
+        try:
+            self._state_publisher(state)
+        except Exception as exc:
+            self._report(str(exc))
