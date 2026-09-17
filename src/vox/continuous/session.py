@@ -16,6 +16,7 @@ _SPEECH_THRESHOLD = 0.5
 _SILENCE_THRESHOLD = 0.35
 _PAUSE_SECONDS = 1.0
 _PREROLL_SECONDS = 0.4
+_IDLE_MINUTES = 5.0
 _TRAILING_SPACE = " "
 
 
@@ -118,6 +119,8 @@ class ContinuousSession:
         reporter: Callable[[str], None] | None = None,
         state_publisher: Callable[[bool], None] | None = None,
         pause_seconds: float = _PAUSE_SECONDS,
+        idle_minutes: float = _IDLE_MINUTES,
+        on_idle_auto_off: Callable[[float], None] | None = None,
     ) -> None:
         """Create an idle session; call ``start`` before toggling.
 
@@ -131,6 +134,8 @@ class ContinuousSession:
             reporter: Optional error/status reporter.
             state_publisher: Optional active-state publisher.
             pause_seconds: Trailing silence that ends an Utterance (must be > 0).
+            idle_minutes: Silence minutes before auto-off (must be > 0).
+            on_idle_auto_off: Optional callback with configured idle minutes.
         """
         self._stream_starter = stream_starter
         self._speech_detector_factory = speech_detector_factory
@@ -140,11 +145,16 @@ class ContinuousSession:
         self._play_end = play_end
         self._reporter = reporter
         self._state_publisher = state_publisher
+        self._idle_minutes = idle_minutes
+        self._idle_limit_samples = int(idle_minutes * 60.0 * _SAMPLE_RATE)
+        self._on_idle_auto_off = on_idle_auto_off
 
         self._lock = threading.Lock()
         self._active = False
         self._started = False
         self._shutting_down = False
+        self._idle_samples = 0
+        self._idle_off_requested = False
         self._detector: SpeechProbabilityModel | None = None
         self._pause = _PauseDetector(pause_seconds=pause_seconds)
         self._listen_stop = threading.Event()
@@ -188,6 +198,8 @@ class ContinuousSession:
             self._active = True
             self._listen_stop = threading.Event()
             self._pause.reset()
+            self._idle_samples = 0
+            self._idle_off_requested = False
             stop_event = self._listen_stop
             self._listen_thread = threading.Thread(
                 target=self._listen_loop,
@@ -217,9 +229,35 @@ class ContinuousSession:
                 padded[: flat.size] = flat
                 flat = padded
         probability = detector.probability(flat)
+        self._note_idle_sample(probability)
         audio = self._pause.ingest(flat, probability)
         if audio is not None:
             self._enqueue_commit(audio)
+
+    def _note_idle_sample(self, probability: float) -> None:
+        """Advance or reset the idle sample clock; auto-off at most once.
+
+        Args:
+            probability: Speech probability for the current frame.
+        """
+        if probability >= _SPEECH_THRESHOLD:
+            self._idle_samples = 0
+            return
+        self._idle_samples += FRAME_SAMPLES
+        if self._idle_samples < self._idle_limit_samples:
+            return
+        with self._lock:
+            if (
+                not self._active
+                or self._idle_off_requested
+                or self._shutting_down
+                or self._listen_stop.is_set()
+            ):
+                return
+            self._idle_off_requested = True
+            self._listen_stop.set()
+        if self._on_idle_auto_off is not None:
+            self._on_idle_auto_off(self._idle_minutes)
 
     def shutdown(self) -> None:
         """Stop listening, drain Commits, and tear down workers. Idempotent."""
