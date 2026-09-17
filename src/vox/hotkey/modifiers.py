@@ -51,10 +51,17 @@ def _windows_physical_key_state(vk: int) -> int:
 
     Returns:
         Raw GetAsyncKeyState result; high bit set means the key is down.
+
+    Raises:
+        RuntimeError: If ``ctypes.windll`` is unavailable (non-Windows).
     """
     import ctypes  # noqa: PLC0415 — Windows-only API; avoid import cost on other OSes
 
-    return int(ctypes.windll.user32.GetAsyncKeyState(vk))
+    # getattr keeps mypy happy on platforms whose stubs omit ctypes.windll.
+    windll = getattr(ctypes, "windll", None)
+    if windll is None:
+        raise RuntimeError("GetAsyncKeyState requires Windows ctypes.windll")
+    return int(windll.user32.GetAsyncKeyState(vk))
 
 
 class ModifierTracker:
