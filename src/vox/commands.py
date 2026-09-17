@@ -28,7 +28,7 @@ from vox.config import (
     get_config,
     get_transcription_options,
 )
-from vox.continuous.session import ContinuousSession
+from vox.continuous.session import ContinuousSession, ContinuousState
 from vox.continuous.vad import FRAME_SAMPLES, load_streaming_vad
 from vox.inject import (
     InjectError,
@@ -499,6 +499,30 @@ def _build_continuous_session(  # noqa: PLR0913
             "of idle.[/dim]"
         )
 
+    def start_refusal() -> str | None:
+        """Refuse Continuous in clipboard-only mode (Commits would overwrite).
+
+        Returns:
+            Refusal message, or None when Continuous may start.
+        """
+        if injection_mode != "clipboard":
+            return None
+        return (
+            "Continuous dictation cannot run in clipboard-only mode; "
+            "each Commit would overwrite the previous one. "
+            "Use clipboard_and_paste or type."
+        )
+
+    published_state: list[ContinuousState] = [ContinuousState(active=False, error=None)]
+
+    def state_publisher(state: ContinuousState) -> None:
+        """Keep the latest Continuous state for Stop window / tray (#40).
+
+        Args:
+            state: Active flag plus optional error from the session.
+        """
+        published_state[0] = state
+
     return ContinuousSession(
         stream_starter=stream_starter,
         speech_detector_factory=load_streaming_vad,
@@ -507,6 +531,8 @@ def _build_continuous_session(  # noqa: PLR0913
         play_start=on_recording_start,
         play_end=on_recording_stop,
         reporter=reporter,
+        state_publisher=state_publisher,
+        start_refusal=start_refusal,
         pause_seconds=pause_seconds,
         idle_minutes=idle_minutes,
         on_idle_auto_off=on_idle_auto_off,
