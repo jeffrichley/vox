@@ -34,7 +34,7 @@ class TestContinuousSessionRobustness:
                 raise RuntimeError("whisper blew up")
             return "recovered"
 
-        island = [0.9] * 3 + [0.1] * (PAUSE_FRAMES + 2)
+        island = [0.9] * 10 + [0.1] * (PAUSE_FRAMES + 2)
         probs = [0.1] * PREROLL_FRAMES + island + island
         session = ContinuousSession(
             stream_starter=lambda _on_frame, stop_event: stop_event.wait(timeout=5.0),
@@ -52,11 +52,11 @@ class TestContinuousSessionRobustness:
         # Act - two Pause Commits; first transcription fails
         for _ in range(PREROLL_FRAMES):
             session.ingest_frame(silence_frame())
-        for _ in range(3):
+        for _ in range(10):
             session.ingest_frame(tone_frame())
         for _ in range(PAUSE_FRAMES + 2):
             session.ingest_frame(silence_frame())
-        for _ in range(3):
+        for _ in range(10):
             session.ingest_frame(tone_frame())
         for _ in range(PAUSE_FRAMES + 2):
             session.ingest_frame(silence_frame())
@@ -88,7 +88,7 @@ class TestContinuousSessionRobustness:
             if len(states) == 1:
                 raise RuntimeError("publish failed")
 
-        probs = [0.1] * PREROLL_FRAMES + [0.9] * 3 + [0.1] * (PAUSE_FRAMES + 2)
+        probs = [0.1] * PREROLL_FRAMES + [0.9] * 10 + [0.1] * (PAUSE_FRAMES + 2)
         session = ContinuousSession(
             stream_starter=lambda _on_frame, stop_event: stop_event.wait(timeout=5.0),
             speech_detector_factory=lambda: ScriptedVad(probs),
@@ -106,7 +106,7 @@ class TestContinuousSessionRobustness:
         assert wait_until(session.is_active)
         for _ in range(PREROLL_FRAMES):
             session.ingest_frame(silence_frame())
-        for _ in range(3):
+        for _ in range(10):
             session.ingest_frame(tone_frame())
         for _ in range(PAUSE_FRAMES + 2):
             session.ingest_frame(silence_frame())

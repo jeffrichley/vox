@@ -191,7 +191,7 @@ class TestContinuousSessionMicStall:
         assert wait_until(lambda: "start" in cues)
         for _ in range(PREROLL_FRAMES):
             session.ingest_frame(silence_frame())
-        for _ in range(5):
+        for _ in range(10):
             session.ingest_frame(tone_frame())
 
         # Act - advance fake clock past stall without delivering more frames

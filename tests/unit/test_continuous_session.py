@@ -16,6 +16,7 @@ from vox.continuous.vad import FRAME_SAMPLES
 _SAMPLE_RATE = 16_000
 _PAUSE_FRAMES = int(1.0 * _SAMPLE_RATE / FRAME_SAMPLES)  # 31
 _PREROLL_FRAMES = int(0.4 * _SAMPLE_RATE / FRAME_SAMPLES)  # 12
+_SPEECH_FRAMES = 10  # just over 0.3 s junk-guard minimum
 
 
 class ScriptedVad:
@@ -79,7 +80,9 @@ def _feed_preroll(session: ContinuousSession) -> None:
         session.ingest_frame(_silence_frame())
 
 
-def _feed_speech_then_pause(session: ContinuousSession, speech_frames: int = 3) -> None:
+def _feed_speech_then_pause(
+    session: ContinuousSession, speech_frames: int = _SPEECH_FRAMES
+) -> None:
     """Feed speech frames then enough silence frames to trigger a Pause Commit."""
     for _ in range(speech_frames):
         session.ingest_frame(_tone_frame())
@@ -96,7 +99,11 @@ class TestContinuousSessionPauseCommit:
         """Speech then 1 s silence Commits text plus a trailing space."""
         # Arrange - session with scripted speech then silence probabilities
         delivered: list[str] = []
-        probs = [0.1] * _PREROLL_FRAMES + [0.9] * 3 + [0.1] * (_PAUSE_FRAMES + 2)
+        probs = (
+            [0.1] * _PREROLL_FRAMES
+            + [0.9] * _SPEECH_FRAMES
+            + [0.1] * (_PAUSE_FRAMES + 2)
+        )
         session = _make_session(probs=probs, deliverer=delivered.append)
         session.start()
         session.request_toggle()
@@ -104,7 +111,7 @@ class TestContinuousSessionPauseCommit:
 
         # Act - feed preroll, speech, and a full Pause of silence
         _feed_preroll(session)
-        _feed_speech_then_pause(session, speech_frames=3)
+        _feed_speech_then_pause(session)
         deadline = time.monotonic() + 2.0
         while not delivered and time.monotonic() < deadline:
             time.sleep(0.01)
@@ -142,7 +149,7 @@ class TestContinuousSessionFifoOrder:
             second_queued.set()
             return "second"
 
-        island = [0.9] * 3 + [0.1] * (_PAUSE_FRAMES + 2)
+        island = [0.9] * _SPEECH_FRAMES + [0.1] * (_PAUSE_FRAMES + 2)
         probs = [0.1] * _PREROLL_FRAMES + island + island
         session = _make_session(
             probs=probs,
@@ -155,11 +162,11 @@ class TestContinuousSessionFifoOrder:
 
         # Act - enqueue two Pause Commits while the first transcription blocks
         _feed_preroll(session)
-        _feed_speech_then_pause(session, speech_frames=3)
+        _feed_speech_then_pause(session)
         deadline = time.monotonic() + 2.0
         while call_count < 1 and time.monotonic() < deadline:
             time.sleep(0.01)
-        _feed_speech_then_pause(session, speech_frames=3)
+        _feed_speech_then_pause(session)
         deadline = time.monotonic() + 2.0
         while not second_queued.is_set() and time.monotonic() < deadline:
             time.sleep(0.01)
@@ -193,7 +200,7 @@ class TestContinuousSessionToggleOff:
         session.request_toggle()
         time.sleep(0.05)
         _feed_preroll(session)
-        for _ in range(5):
+        for _ in range(_SPEECH_FRAMES):
             session.ingest_frame(_tone_frame())
 
         # Act - toggle off while speech is still open
@@ -224,7 +231,11 @@ class TestContinuousSessionShutdown:
             release.wait(timeout=2.0)
             return "drained"
 
-        probs = [0.1] * _PREROLL_FRAMES + [0.9] * 3 + [0.1] * (_PAUSE_FRAMES + 2)
+        probs = (
+            [0.1] * _PREROLL_FRAMES
+            + [0.9] * _SPEECH_FRAMES
+            + [0.1] * (_PAUSE_FRAMES + 2)
+        )
         session = _make_session(
             probs=probs,
             deliverer=delivered.append,
@@ -234,7 +245,7 @@ class TestContinuousSessionShutdown:
         session.request_toggle()
         time.sleep(0.05)
         _feed_preroll(session)
-        _feed_speech_then_pause(session, speech_frames=3)
+        _feed_speech_then_pause(session)
         time.sleep(0.05)
 
         # Act - shutdown while Commit is in flight, then shutdown again
