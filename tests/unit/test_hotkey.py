@@ -10,6 +10,7 @@ import pytest
 # Import for listener simulation
 from pynput import keyboard  # type: ignore[import-untyped]
 
+from vox.hotkey.modifiers import ModifierTracker
 from vox.hotkey.register import (
     _key_matches,
     _normalize_modifier,
@@ -19,7 +20,6 @@ from vox.hotkey.register import (
     _RecordingHooks,
     run_push_to_talk_loop,
 )
-from vox.hotkey.modifiers import ModifierTracker
 
 
 def _event_tracker() -> ModifierTracker:
