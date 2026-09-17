@@ -38,3 +38,12 @@ cue_volume = 0.5
 # - "type": type directly into the focused window without modifying the clipboard
 #   (needs accessibility permission).
 injection_mode = "clipboard"
+
+# Optional: Continuous dictation toggle hotkey. Default: ctrl+alt+space.
+# Must differ from hotkey above (modifier order and aliases like control/ctrl,
+# win/cmd are ignored when comparing). Env: VOX_CONTINUOUS_HOTKEY.
+# continuous_hotkey = "ctrl+alt+space"
+
+# Optional: Pause length in seconds before an Utterance is Committed. Default: 1.0.
+# Must be a finite number greater than 0. Env: VOX_CONTINUOUS_PAUSE_SECONDS.
+# continuous_pause_seconds = 1.0

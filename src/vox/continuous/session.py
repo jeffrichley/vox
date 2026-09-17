@@ -117,6 +117,7 @@ class ContinuousSession:
         play_end: Callable[[], None],
         reporter: Callable[[str], None] | None = None,
         state_publisher: Callable[[bool], None] | None = None,
+        pause_seconds: float = _PAUSE_SECONDS,
     ) -> None:
         """Create an idle session; call ``start`` before toggling.
 
@@ -129,6 +130,7 @@ class ContinuousSession:
             play_end: End cue (toggle-off).
             reporter: Optional error/status reporter.
             state_publisher: Optional active-state publisher.
+            pause_seconds: Trailing silence that ends an Utterance (must be > 0).
         """
         self._stream_starter = stream_starter
         self._speech_detector_factory = speech_detector_factory
@@ -144,7 +146,7 @@ class ContinuousSession:
         self._started = False
         self._shutting_down = False
         self._detector: SpeechProbabilityModel | None = None
-        self._pause = _PauseDetector()
+        self._pause = _PauseDetector(pause_seconds=pause_seconds)
         self._listen_stop = threading.Event()
         self._listen_thread: threading.Thread | None = None
         self._commit_queue: deque[np.ndarray | None] = deque()

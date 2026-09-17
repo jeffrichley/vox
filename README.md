@@ -65,11 +65,12 @@ cp vox.toml.example ~/.vox/vox.toml
 
 ## Continuous dictation
 
-- **Toggle:** Tap `ctrl+alt+d` to turn Continuous dictation on (start cue) or off (end cue). It is off when Vox starts.
-- **Commit on Pause:** While it is on, speak freely. After about 1 second of silence, each Utterance is transcribed and Injected into whichever window has focus at Commit time, followed by a trailing space so consecutive Utterances do not run together.
+- **Toggle:** Tap your Continuous hotkey (config `continuous_hotkey`, default `ctrl+alt+space`; env `VOX_CONTINUOUS_HOTKEY`) to turn Continuous dictation on (start cue) or off (end cue). It is off when Vox starts. It must differ from the Push-to-talk `hotkey` (modifier order and aliases like `control`/`ctrl`, `win`/`cmd` are ignored when comparing).
+- **Commit on Pause:** While it is on, speak freely. After `continuous_pause_seconds` of silence (default `1.0`; env `VOX_CONTINUOUS_PAUSE_SECONDS`; must be a finite number `> 0`), each Utterance is transcribed and Injected into whichever window has focus at Commit time, followed by a trailing space so consecutive Utterances do not run together.
 - **Focus:** Text goes to the window focused when the Commit happens—wait for the text before switching windows if you care where it lands. Vox does not track windows.
 - **Push-to-talk:** Ignored while Continuous dictation is on; works unchanged while it is off.
 - **Hotkey pass-through:** The Continuous toggle is not suppressed, so the focused app still receives the keypress.
+- **Live rebind:** Changing `continuous_hotkey` (or the Push-to-talk `hotkey`) while Vox is running rebinds without a full restart.
 - **`vox settings`** — Open the standalone settings window. It exposes `Recording`, `Transcription`, `Output`, and `Runtime` sections, autosaves each valid completed change, warns when env vars currently override file-backed values, and shows restart guidance for changes that do not affect an already-running session until restart.
 - **Cue volume:** Set `cue_volume` in config (or `VOX_CUE_VOLUME`) to any value from `0.0` to `1.0`. Default is `0.5`. In the settings screen, changing the cue-volume slider autosaves after a short debounce and then plays a cue preview automatically at the new level.
 - **`vox devices`** — List audio input devices (ID, name, host API). Use this to choose `device_id` in config.
