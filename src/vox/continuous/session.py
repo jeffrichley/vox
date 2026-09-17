@@ -247,7 +247,12 @@ class ContinuousSession:
         if self._idle_samples < self._idle_limit_samples:
             return
         with self._lock:
-            if not self._active or self._idle_off_requested or self._shutting_down:
+            if (
+                not self._active
+                or self._idle_off_requested
+                or self._shutting_down
+                or self._listen_stop.is_set()
+            ):
                 return
             self._idle_off_requested = True
             self._listen_stop.set()

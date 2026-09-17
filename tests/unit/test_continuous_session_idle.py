@@ -179,3 +179,39 @@ class TestContinuousSessionIdleAutoOff:
         # Assert - pending Commit landed and end cue played
         assert delivered == ["hello "]
         assert "end" in cues
+
+    def test_manual_toggle_off_near_idle_does_not_emit_auto_off(self) -> None:
+        """Manual toggle-off before idle lands must not print auto-off."""
+        # Arrange - almost at idle, then user toggles off
+        idle_frames = 5
+        idle_minutes = idle_frames * FRAME_SAMPLES / (_SAMPLE_RATE * 60.0)
+        idle_events: list[float] = []
+        cues: list[str] = []
+        probs = [0.1] * (idle_frames + 10)
+        session = _make_session(
+            probs=probs,
+            deliverer=lambda _t: None,
+            play_start=lambda: cues.append("start"),
+            play_end=lambda: cues.append("end"),
+            idle_minutes=idle_minutes,
+            on_idle_auto_off=idle_events.append,
+        )
+        session.start()
+        session.request_toggle()
+        time.sleep(0.05)
+        for _ in range(idle_frames - 1):
+            session.ingest_frame(_silence_frame())
+
+        # Act - manual off, then more silence that would have crossed idle
+        session.request_toggle()
+        for _ in range(idle_frames + 2):
+            session.ingest_frame(_silence_frame())
+        deadline = time.monotonic() + 2.0
+        while "end" not in cues and time.monotonic() < deadline:
+            time.sleep(0.01)
+        session.shutdown()
+
+        # Assert - end cue from toggle; idle callback never ran
+        assert idle_events == []
+        assert "end" in cues
+        assert session.is_active() is False
