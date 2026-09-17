@@ -10,6 +10,7 @@ import pytest
 # Import for listener simulation
 from pynput import keyboard  # type: ignore[import-untyped]
 
+from vox.hotkey.modifiers import ModifierTracker
 from vox.hotkey.register import (
     _key_matches,
     _normalize_modifier,
@@ -19,6 +20,11 @@ from vox.hotkey.register import (
     _RecordingHooks,
     run_push_to_talk_loop,
 )
+
+
+def _event_tracker() -> ModifierTracker:
+    """Tracker that trusts key events only (unit tests; no OS key state)."""
+    return ModifierTracker(reconcile_physical=False)
 
 
 @pytest.mark.unit
@@ -89,6 +95,7 @@ class TestRunPushToTalkLoop:
                     f"stop:{session.stop_event is not None and session.stop_event.is_set()}"
                 ),
             ),
+            modifier_tracker=_event_tracker(),
         )
         session.queue.put = lambda _item: events.append("queued")  # type: ignore[method-assign]
 
@@ -119,6 +126,7 @@ class TestRunPushToTalkLoop:
             ),
             on_audio=mock.Mock(),
             recording_hooks=_RecordingHooks(on_start=on_start, on_stop=on_stop),
+            modifier_tracker=_event_tracker(),
         )
 
         with mock.patch("vox.hotkey.register.threading.Thread"):

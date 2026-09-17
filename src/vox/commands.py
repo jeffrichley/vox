@@ -30,6 +30,7 @@ from vox.config import (
 )
 from vox.continuous.session import ContinuousSession, ContinuousState
 from vox.continuous.vad import FRAME_SAMPLES, load_streaming_vad
+from vox.hotkey.modifiers import ModifierTracker
 from vox.inject import (
     InjectError,
     get_clipboard,
@@ -188,6 +189,7 @@ def _run_push_to_talk_loop(  # noqa: PLR0913
     continuous_hotkey: str | None = None,
     on_continuous_toggle: Callable[[], None] | None = None,
     is_continuous_active: Callable[[], bool] | None = None,
+    modifier_tracker: ModifierTracker | None = None,
 ) -> None:
     """Lazy-load and run the push-to-talk loop implementation.
 
@@ -203,6 +205,7 @@ def _run_push_to_talk_loop(  # noqa: PLR0913
         continuous_hotkey: Optional Continuous dictation toggle combo.
         on_continuous_toggle: Optional Continuous toggle callback.
         is_continuous_active: Optional predicate gating push-to-talk while active.
+        modifier_tracker: Shared modifier tracker for matching and Continuous wait.
     """
     hotkey_module = cast(HotkeyModuleProtocol, import_module("vox.hotkey"))
     hotkey_module.run_push_to_talk_loop(
@@ -217,6 +220,7 @@ def _run_push_to_talk_loop(  # noqa: PLR0913
         continuous_hotkey,
         on_continuous_toggle,
         is_continuous_active,
+        modifier_tracker,
     )
 
 
@@ -416,7 +420,7 @@ def _build_audio_handler(
     return on_audio
 
 
-def _build_continuous_session(  # noqa: PLR0913
+def _build_continuous_session(  # noqa: PLR0913, C901 — wiring many injected Continuous deps
     console: Console,
     model: WhisperModel,
     injection_mode: str,
@@ -427,6 +431,7 @@ def _build_continuous_session(  # noqa: PLR0913
     on_recording_stop: Callable[[], None],
     pause_seconds: float = DEFAULT_CONTINUOUS_PAUSE_SECONDS,
     idle_minutes: float = DEFAULT_CONTINUOUS_IDLE_MINUTES,
+    modifier_tracker: ModifierTracker | None = None,
 ) -> ContinuousSession:
     """Build the Continuous dictation session for one ``handle_run`` lifetime.
 
@@ -441,6 +446,7 @@ def _build_continuous_session(  # noqa: PLR0913
         on_recording_stop: End cue callback reused as Continuous end cue.
         pause_seconds: Trailing silence that ends an Utterance.
         idle_minutes: Silence minutes before Continuous auto-off.
+        modifier_tracker: Shared held-modifier tracker for toggle-off wait.
 
     Returns:
         Idle ContinuousSession (no stream/VAD until first toggle-on).
@@ -501,6 +507,14 @@ def _build_continuous_session(  # noqa: PLR0913
         """
         console.print(f"[dim]{message}[/dim]")
 
+    def warn(message: str) -> None:
+        """Print a yellow Continuous warning (modifier-wait timeout).
+
+        Args:
+            message: Warning detail to print.
+        """
+        console.print(f"[yellow]{message}[/yellow]")
+
     def on_idle_auto_off(minutes: float) -> None:
         """Print a dim message when Continuous auto-off fires.
 
@@ -545,8 +559,10 @@ def _build_continuous_session(  # noqa: PLR0913
         play_end=on_recording_stop,
         reporter=reporter,
         status=status,
+        warn=warn,
         state_publisher=state_publisher,
         start_refusal=start_refusal,
+        modifier_tracker=modifier_tracker,
         pause_seconds=pause_seconds,
         idle_minutes=idle_minutes,
         on_idle_auto_off=on_idle_auto_off,
@@ -663,6 +679,7 @@ def handle_run(
         cue_volume,
     )
     on_audio = _build_audio_handler(console, model, injection_mode)
+    modifiers = ModifierTracker()
     continuous = _build_continuous_session(
         console,
         model,
@@ -674,6 +691,7 @@ def handle_run(
         on_recording_stop,
         pause_seconds=pause_seconds,
         idle_minutes=idle_minutes,
+        modifier_tracker=modifiers,
     )
     continuous.start()
 
@@ -713,6 +731,7 @@ def handle_run(
             continuous_hotkey=active_continuous_hotkey,
             on_continuous_toggle=continuous.request_toggle,
             is_continuous_active=continuous.is_active,
+            modifier_tracker=modifiers,
         )
 
     try:
