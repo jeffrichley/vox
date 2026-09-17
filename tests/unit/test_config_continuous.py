@@ -16,7 +16,7 @@ class TestContinuousConfigDefaults:
     """get_config exposes Continuous defaults when keys are omitted."""
 
     def test_get_config_defaults_continuous_hotkey_and_pause(self) -> None:
-        """Missing Continuous keys become ctrl+alt+d and 1.0."""
+        """Missing Continuous keys become ctrl+alt+d, 1.0 Pause, 5 idle minutes."""
         # Arrange - only required hotkey present
         with mock.patch.object(
             vox_config,
@@ -29,10 +29,11 @@ class TestContinuousConfigDefaults:
         # Assert - Continuous defaults applied
         assert out["continuous_hotkey"] == "ctrl+alt+d"
         assert out["continuous_pause_seconds"] == 1.0
+        assert out["continuous_idle_minutes"] == 5.0
 
     def test_get_config_preserves_explicit_continuous_values(self) -> None:
         """Explicit Continuous keys survive get_config."""
-        # Arrange - custom Continuous hotkey and Pause
+        # Arrange - custom Continuous hotkey, Pause, and idle
         with mock.patch.object(
             vox_config,
             "load_config",
@@ -40,6 +41,7 @@ class TestContinuousConfigDefaults:
                 "hotkey": "ctrl+f12",
                 "continuous_hotkey": "ctrl+alt+d",
                 "continuous_pause_seconds": 0.75,
+                "continuous_idle_minutes": 2.5,
             },
         ):
             # Act - load validated config
@@ -48,6 +50,7 @@ class TestContinuousConfigDefaults:
         # Assert - explicit values preserved
         assert out["continuous_hotkey"] == "ctrl+alt+d"
         assert out["continuous_pause_seconds"] == 0.75
+        assert out["continuous_idle_minutes"] == 2.5
 
 
 @pytest.mark.unit
@@ -72,6 +75,35 @@ class TestContinuousPauseValidation:
         """A finite Pause greater than zero is accepted."""
         # Arrange - valid Pause
         raw = {"hotkey": "ctrl+f12", "continuous_pause_seconds": 0.5}
+
+        # Act - validate
+        vox_config.validate_config(raw)
+
+        # Assert - no exception
+
+
+@pytest.mark.unit
+class TestContinuousIdleValidation:
+    """continuous_idle_minutes rejects non-positive and non-finite values."""
+
+    @pytest.mark.parametrize(
+        "value",
+        [0, -1.0, True, "abc", math.inf, -math.inf],
+    )
+    def test_invalid_idle_raises_field_error(self, value: object) -> None:
+        """Invalid idle values fail with continuous_idle_minutes in the message."""
+        # Arrange - config with invalid idle value under test
+        raw = {"hotkey": "ctrl+f12", "continuous_idle_minutes": value}
+
+        # Act - validate config with invalid idle
+        # Assert - validation fails naming continuous_idle_minutes
+        with pytest.raises(vox_config.ConfigError, match="continuous_idle_minutes"):
+            vox_config.validate_config(raw)
+
+    def test_positive_idle_passes(self) -> None:
+        """A finite idle greater than zero is accepted."""
+        # Arrange - valid idle minutes
+        raw = {"hotkey": "ctrl+f12", "continuous_idle_minutes": 5}
 
         # Act - validate
         vox_config.validate_config(raw)
@@ -162,6 +194,7 @@ class TestContinuousEnvOverrides:
                     {
                         "VOX_CONTINUOUS_HOTKEY": "ctrl+alt+f",
                         "VOX_CONTINUOUS_PAUSE_SECONDS": "0.8",
+                        "VOX_CONTINUOUS_IDLE_MINUTES": "3",
                     },
                     clear=False,
                 ),
@@ -172,6 +205,7 @@ class TestContinuousEnvOverrides:
         # Assert - env wins
         assert out["continuous_hotkey"] == "ctrl+alt+f"
         assert out["continuous_pause_seconds"] == 0.8
+        assert out["continuous_idle_minutes"] == 3.0
 
     def test_get_env_override_fields_includes_continuous(self) -> None:
         """Override metadata reports Continuous env sources."""
@@ -181,6 +215,7 @@ class TestContinuousEnvOverrides:
             {
                 "VOX_CONTINUOUS_HOTKEY": "ctrl+alt+d",
                 "VOX_CONTINUOUS_PAUSE_SECONDS": "0.8",
+                "VOX_CONTINUOUS_IDLE_MINUTES": "3",
             },
             clear=False,
         ):
@@ -190,3 +225,4 @@ class TestContinuousEnvOverrides:
         # Assert - Continuous fields mapped to env names
         assert out["continuous_hotkey"] == "VOX_CONTINUOUS_HOTKEY"
         assert out["continuous_pause_seconds"] == "VOX_CONTINUOUS_PAUSE_SECONDS"
+        assert out["continuous_idle_minutes"] == "VOX_CONTINUOUS_IDLE_MINUTES"

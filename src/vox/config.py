@@ -172,10 +172,11 @@ _ENV_OVERRIDES: list[tuple[str, str, bool]] = [
     ("VOX_CONTINUOUS_HOTKEY", "continuous_hotkey", True),
 ]
 
-# Table-driven float env overrides shared by cue_volume and Continuous Pause.
+# Table-driven float env overrides shared by cue_volume and Continuous keys.
 _FLOAT_ENV_OVERRIDES: list[tuple[str, str]] = [
     ("VOX_CUE_VOLUME", "cue_volume"),
     ("VOX_CONTINUOUS_PAUSE_SECONDS", "continuous_pause_seconds"),
+    ("VOX_CONTINUOUS_IDLE_MINUTES", "continuous_idle_minutes"),
 ]
 
 _HOTKEY_MODIFIER_ALIASES: dict[str, str] = {
@@ -190,6 +191,7 @@ _HOTKEY_MODIFIER_ALIASES: dict[str, str] = {
 
 DEFAULT_CONTINUOUS_HOTKEY = "ctrl+alt+d"
 DEFAULT_CONTINUOUS_PAUSE_SECONDS = 1.0
+DEFAULT_CONTINUOUS_IDLE_MINUTES = 5.0
 
 
 def _apply_device_id_env(raw: dict[str, Any]) -> None:
@@ -219,7 +221,7 @@ def _apply_use_tray_env(raw: dict[str, Any]) -> None:
 
 
 def _apply_float_env_overrides(raw: dict[str, Any]) -> None:
-    """Apply table-driven float env overrides (cue_volume, Continuous Pause).
+    """Apply table-driven float env overrides (cue_volume, Continuous keys).
 
     Invalid floats are left as the raw string so validate_config can reject them
     with a field-specific error (no silent defaults).
@@ -262,6 +264,7 @@ _CONFIG_KEYS = (
     "use_tray",
     "continuous_hotkey",
     "continuous_pause_seconds",
+    "continuous_idle_minutes",
 )
 
 type TomlScalar = str | int | float | bool
@@ -438,27 +441,24 @@ def _validate_cue_volume(raw: dict[str, Any]) -> None:
         raise ValueError("cue_volume: must be between 0.0 and 1.0")
 
 
-def _validate_continuous_pause_seconds(raw: dict[str, Any]) -> None:
-    """Raise if continuous_pause_seconds is present and not a finite number > 0.
+def _validate_positive_finite_number(raw: dict[str, Any], key: str) -> None:
+    """Raise if ``key`` is present and not a finite number greater than 0.
 
     Args:
         raw: Config dict to validate.
+        key: Config field name to check when present.
 
     Raises:
-        ValueError: If continuous_pause_seconds is present and invalid.
+        ValueError: If the field is present and invalid.
     """
-    if "continuous_pause_seconds" not in raw or raw["continuous_pause_seconds"] is None:
+    if key not in raw or raw[key] is None:
         return
-    value = raw["continuous_pause_seconds"]
+    value = raw[key]
     if isinstance(value, bool) or not isinstance(value, int | float):
-        raise ValueError(
-            "continuous_pause_seconds: must be a finite number greater than 0"
-        )
-    pause = float(value)
-    if not math.isfinite(pause) or pause <= 0:
-        raise ValueError(
-            "continuous_pause_seconds: must be a finite number greater than 0"
-        )
+        raise ValueError(f"{key}: must be a finite number greater than 0")
+    number = float(value)
+    if not math.isfinite(number) or number <= 0:
+        raise ValueError(f"{key}: must be a finite number greater than 0")
 
 
 def _normalize_hotkey_combo(hotkey_str: str) -> tuple[frozenset[str], str]:
@@ -515,7 +515,8 @@ def validate_config(raw: dict[str, Any]) -> None:
 
     Required: hotkey (non-empty string).
     Optional: device_id (int or None), use_tray (bool), model_size, compute_type,
-    compute_device, injection_mode, continuous_hotkey, continuous_pause_seconds.
+    compute_device, injection_mode, continuous_hotkey, continuous_pause_seconds,
+    continuous_idle_minutes.
     No silent fallbacks for required fields.
 
     Args:
@@ -534,7 +535,8 @@ def validate_config(raw: dict[str, Any]) -> None:
         _validate_injection_mode(raw)
         _validate_cue_volume(raw)
         _validate_optional_str(raw, "continuous_hotkey")
-        _validate_continuous_pause_seconds(raw)
+        _validate_positive_finite_number(raw, "continuous_pause_seconds")
+        _validate_positive_finite_number(raw, "continuous_idle_minutes")
         _validate_hotkey_collision(raw)
     except ValueError as e:
         raise ConfigError(str(e)) from e
@@ -819,7 +821,8 @@ def get_config() -> dict[str, Any]:
 
     Returns:
         Dict with hotkey, device_id, model_size, compute_type, compute_device,
-        injection_mode, cue_volume, continuous_hotkey, continuous_pause_seconds.
+        injection_mode, cue_volume, continuous_hotkey, continuous_pause_seconds,
+        continuous_idle_minutes.
 
     Raises:
         ConfigError: When a required field is missing or invalid.
@@ -843,6 +846,9 @@ def get_config() -> dict[str, Any]:
         ),
         "continuous_pause_seconds": _float_default(
             raw, "continuous_pause_seconds", DEFAULT_CONTINUOUS_PAUSE_SECONDS
+        ),
+        "continuous_idle_minutes": _float_default(
+            raw, "continuous_idle_minutes", DEFAULT_CONTINUOUS_IDLE_MINUTES
         ),
     }
     return out

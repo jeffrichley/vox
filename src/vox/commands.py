@@ -22,6 +22,7 @@ from vox.capture import (
 )
 from vox.config import (
     DEFAULT_CONTINUOUS_HOTKEY,
+    DEFAULT_CONTINUOUS_IDLE_MINUTES,
     DEFAULT_CONTINUOUS_PAUSE_SECONDS,
     ConfigError,
     get_config,
@@ -420,6 +421,7 @@ def _build_continuous_session(  # noqa: PLR0913
     on_recording_start: Callable[[], None],
     on_recording_stop: Callable[[], None],
     pause_seconds: float = DEFAULT_CONTINUOUS_PAUSE_SECONDS,
+    idle_minutes: float = DEFAULT_CONTINUOUS_IDLE_MINUTES,
 ) -> ContinuousSession:
     """Build the Continuous dictation session for one ``handle_run`` lifetime.
 
@@ -433,6 +435,7 @@ def _build_continuous_session(  # noqa: PLR0913
         on_recording_start: Start cue callback reused as Continuous start cue.
         on_recording_stop: End cue callback reused as Continuous end cue.
         pause_seconds: Trailing silence that ends an Utterance.
+        idle_minutes: Silence minutes before Continuous auto-off.
 
     Returns:
         Idle ContinuousSession (no stream/VAD until first toggle-on).
@@ -485,6 +488,17 @@ def _build_continuous_session(  # noqa: PLR0913
         """
         console.print(f"[red]Continuous dictation error:[/red] {message}")
 
+    def on_idle_auto_off(minutes: float) -> None:
+        """Print a dim message when Continuous auto-off fires.
+
+        Args:
+            minutes: Configured idle minutes that triggered auto-off.
+        """
+        console.print(
+            f"[dim]Continuous dictation auto-off after {minutes:g} minutes "
+            "of idle.[/dim]"
+        )
+
     return ContinuousSession(
         stream_starter=stream_starter,
         speech_detector_factory=load_streaming_vad,
@@ -494,6 +508,8 @@ def _build_continuous_session(  # noqa: PLR0913
         play_end=on_recording_stop,
         reporter=reporter,
         pause_seconds=pause_seconds,
+        idle_minutes=idle_minutes,
+        on_idle_auto_off=on_idle_auto_off,
     )
 
 
@@ -588,6 +604,9 @@ def handle_run(
     pause_seconds = float(
         cfg.get("continuous_pause_seconds", DEFAULT_CONTINUOUS_PAUSE_SECONDS)
     )
+    idle_minutes = float(
+        cfg.get("continuous_idle_minutes", DEFAULT_CONTINUOUS_IDLE_MINUTES)
+    )
 
     model = load_model(
         model_size_or_path=model_size,
@@ -614,6 +633,7 @@ def handle_run(
         on_recording_start,
         on_recording_stop,
         pause_seconds=pause_seconds,
+        idle_minutes=idle_minutes,
     )
     continuous.start()
 
