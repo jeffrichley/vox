@@ -71,7 +71,7 @@ class TestContinuousHotkeyRebind:
                     "compute_type": "float32",
                     "compute_device": "cpu",
                     "injection_mode": "clipboard",
-                    "continuous_hotkey": "ctrl+alt+space",
+                    "continuous_hotkey": "ctrl+alt+d",
                     "continuous_pause_seconds": 1.0,
                 },
                 {
@@ -81,7 +81,7 @@ class TestContinuousHotkeyRebind:
                     "compute_type": "float32",
                     "compute_device": "cpu",
                     "injection_mode": "clipboard",
-                    "continuous_hotkey": "ctrl+alt+d",
+                    "continuous_hotkey": "ctrl+alt+f",
                     "continuous_pause_seconds": 1.0,
                 },
             ]
@@ -90,6 +90,6 @@ class TestContinuousHotkeyRebind:
             handle_run(mock_console, stop_event=stop_ev)
 
         # Assert - Continuous hotkey rebound and message printed
-        assert continuous_calls == ["ctrl+alt+space", "ctrl+alt+d"]
+        assert continuous_calls == ["ctrl+alt+d", "ctrl+alt+f"]
         calls = [str(c) for c in mock_console.print.call_args_list]
         assert any("Rebound continuous hotkey" in c for c in calls)

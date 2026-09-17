@@ -65,7 +65,7 @@ cp vox.toml.example ~/.vox/vox.toml
 
 ## Continuous dictation
 
-- **Toggle:** Tap your Continuous hotkey (config `continuous_hotkey`, default `ctrl+alt+space`; env `VOX_CONTINUOUS_HOTKEY`) to turn Continuous dictation on (start cue) or off (end cue). It is off when Vox starts. It must differ from the Push-to-talk `hotkey` (modifier order and aliases like `control`/`ctrl`, `win`/`cmd` are ignored when comparing).
+- **Toggle:** Tap your Continuous hotkey (config `continuous_hotkey`, default `ctrl+alt+d`; env `VOX_CONTINUOUS_HOTKEY`) to turn Continuous dictation on (start cue) or off (end cue). It is off when Vox starts. It must differ from the Push-to-talk `hotkey` (modifier order and aliases like `control`/`ctrl`, `win`/`cmd` are ignored when comparing). Default avoids `ctrl+alt+space`, which clashes with Claude Code on many machines.
 - **Commit on Pause:** While it is on, speak freely. After `continuous_pause_seconds` of silence (default `1.0`; env `VOX_CONTINUOUS_PAUSE_SECONDS`; must be a finite number `> 0`), each Utterance is transcribed and Injected into whichever window has focus at Commit time, followed by a trailing space so consecutive Utterances do not run together.
 - **Focus:** Text goes to the window focused when the Commit happens—wait for the text before switching windows if you care where it lands. Vox does not track windows.
 - **Push-to-talk:** Ignored while Continuous dictation is on; works unchanged while it is off.

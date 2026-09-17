@@ -16,7 +16,7 @@ class TestContinuousConfigDefaults:
     """get_config exposes Continuous defaults when keys are omitted."""
 
     def test_get_config_defaults_continuous_hotkey_and_pause(self) -> None:
-        """Missing Continuous keys become ctrl+alt+space and 1.0."""
+        """Missing Continuous keys become ctrl+alt+d and 1.0."""
         # Arrange - only required hotkey present
         with mock.patch.object(
             vox_config,
@@ -27,7 +27,7 @@ class TestContinuousConfigDefaults:
             out = vox_config.get_config()
 
         # Assert - Continuous defaults applied
-        assert out["continuous_hotkey"] == "ctrl+alt+space"
+        assert out["continuous_hotkey"] == "ctrl+alt+d"
         assert out["continuous_pause_seconds"] == 1.0
 
     def test_get_config_preserves_explicit_continuous_values(self) -> None:
@@ -129,7 +129,7 @@ class TestHotkeyCollision:
         # Arrange - distinct combos
         raw = {
             "hotkey": "ctrl+f12",
-            "continuous_hotkey": "ctrl+alt+space",
+            "continuous_hotkey": "ctrl+alt+d",
         }
 
         # Act - validate
@@ -153,14 +153,14 @@ class TestContinuousEnvOverrides:
                     "_load_toml",
                     return_value={
                         "hotkey": "ctrl+f12",
-                        "continuous_hotkey": "ctrl+alt+space",
+                        "continuous_hotkey": "ctrl+alt+d",
                         "continuous_pause_seconds": 1.0,
                     },
                 ),
                 mock.patch.dict(
                     os.environ,
                     {
-                        "VOX_CONTINUOUS_HOTKEY": "ctrl+alt+d",
+                        "VOX_CONTINUOUS_HOTKEY": "ctrl+alt+f",
                         "VOX_CONTINUOUS_PAUSE_SECONDS": "0.8",
                     },
                     clear=False,
@@ -170,7 +170,7 @@ class TestContinuousEnvOverrides:
                 out = vox_config.load_config()
 
         # Assert - env wins
-        assert out["continuous_hotkey"] == "ctrl+alt+d"
+        assert out["continuous_hotkey"] == "ctrl+alt+f"
         assert out["continuous_pause_seconds"] == 0.8
 
     def test_get_env_override_fields_includes_continuous(self) -> None:

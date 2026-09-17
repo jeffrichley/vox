@@ -188,7 +188,7 @@ _HOTKEY_MODIFIER_ALIASES: dict[str, str] = {
     "win": "cmd",
 }
 
-DEFAULT_CONTINUOUS_HOTKEY = "ctrl+alt+space"
+DEFAULT_CONTINUOUS_HOTKEY = "ctrl+alt+d"
 DEFAULT_CONTINUOUS_PAUSE_SECONDS = 1.0
 
 
