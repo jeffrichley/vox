@@ -29,6 +29,7 @@ from vox.config import (
     get_transcription_options,
 )
 from vox.continuous.session import ContinuousSession, ContinuousState
+from vox.continuous.status_text import publish_continuous_state
 from vox.continuous.vad import FRAME_SAMPLES, load_streaming_vad
 from vox.hotkey.modifiers import ModifierTracker
 from vox.inject import (
@@ -420,7 +421,7 @@ def _build_audio_handler(
     return on_audio
 
 
-def _build_continuous_session(  # noqa: PLR0913, C901 — wiring many injected Continuous deps
+def _build_continuous_session(  # noqa: PLR0913 — wiring many injected Continuous deps
     console: Console,
     model: WhisperModel,
     injection_mode: str,
@@ -540,16 +541,6 @@ def _build_continuous_session(  # noqa: PLR0913, C901 — wiring many injected C
             "Use clipboard_and_paste or type."
         )
 
-    published_state: list[ContinuousState] = [ContinuousState(active=False, error=None)]
-
-    def state_publisher(state: ContinuousState) -> None:
-        """Keep the latest Continuous state for Stop window / tray (#40).
-
-        Args:
-            state: Active flag plus optional error from the session.
-        """
-        published_state[0] = state
-
     return ContinuousSession(
         stream_starter=stream_starter,
         speech_detector_factory=load_streaming_vad,
@@ -560,7 +551,7 @@ def _build_continuous_session(  # noqa: PLR0913, C901 — wiring many injected C
         reporter=reporter,
         status=status,
         warn=warn,
-        state_publisher=state_publisher,
+        state_publisher=publish_continuous_state,
         start_refusal=start_refusal,
         modifier_tracker=modifier_tracker,
         pause_seconds=pause_seconds,
@@ -693,6 +684,7 @@ def handle_run(
         idle_minutes=idle_minutes,
         modifier_tracker=modifiers,
     )
+    publish_continuous_state(ContinuousState(active=False, error=None))
     continuous.start()
 
     console.print(
