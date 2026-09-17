@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from vox.continuous.vad import FRAME_SAMPLES, SpeechProbabilityModel
+from vox.hotkey.modifiers import ModifierTracker
 
 _SAMPLE_RATE = 16_000
 _SPEECH_THRESHOLD = 0.5
@@ -23,6 +24,10 @@ _MIC_STALL_MESSAGE = "Microphone stopped delivering audio."
 _MIN_SPEECH_SECONDS = 0.3
 _TRAILING_SPACE = " "
 _NO_SPEECH_MESSAGE = "No speech detected."
+_MODIFIER_WAIT_SECONDS = 2.0
+_MODIFIER_WAIT_WARNING = (
+    "Modifiers still held after toggle-off; injecting Continuous text anyway."
+)
 
 
 @dataclass(frozen=True)
@@ -44,6 +49,7 @@ class _PendingCommit:
 
     audio: np.ndarray
     speech_samples: int
+    wait_for_modifiers: bool = False
 
 
 @dataclass
@@ -153,14 +159,18 @@ class ContinuousSession:
         play_end: Callable[[], None],
         reporter: Callable[[str], None] | None = None,
         status: Callable[[str], None] | None = None,
+        warn: Callable[[str], None] | None = None,
         state_publisher: Callable[[ContinuousState], None] | None = None,
         start_refusal: Callable[[], str | None] | None = None,
+        modifier_tracker: ModifierTracker | None = None,
         pause_seconds: float = _PAUSE_SECONDS,
         idle_minutes: float = _IDLE_MINUTES,
         on_idle_auto_off: Callable[[float], None] | None = None,
         clock: Callable[[], float] | None = None,
+        sleep: Callable[[float], None] | None = None,
         mic_stall_seconds: float = _MIC_STALL_SECONDS,
         min_speech_seconds: float = _MIN_SPEECH_SECONDS,
+        modifier_wait_seconds: float = _MODIFIER_WAIT_SECONDS,
     ) -> None:
         """Create an idle session; call ``start`` before toggling.
 
@@ -173,14 +183,18 @@ class ContinuousSession:
             play_end: End cue (toggle-off).
             reporter: Optional error/status reporter.
             status: Optional dim/info notifier (short-sound discard, empty text).
+            warn: Optional yellow warning notifier (modifier-wait timeout).
             state_publisher: Optional publisher of active flag plus error.
             start_refusal: Optional gate; return a message to refuse toggle-on.
+            modifier_tracker: Shared held-modifier set for toggle-off wait.
             pause_seconds: Trailing silence that ends an Utterance (must be > 0).
             idle_minutes: Silence minutes before auto-off (must be > 0).
             on_idle_auto_off: Optional callback with configured idle minutes.
-            clock: Monotonic clock for mic-stall detection (tests inject a fake).
+            clock: Monotonic clock for mic-stall / modifier wait (tests inject).
+            sleep: Sleep used while waiting for modifiers (tests inject a fake).
             mic_stall_seconds: No-audio seconds before mic-failure shutdown.
             min_speech_seconds: Discard Utterances with less detected speech.
+            modifier_wait_seconds: Max wait for modifiers after user toggle-off.
         """
         self._stream_starter = stream_starter
         self._speech_detector_factory = speech_detector_factory
@@ -190,14 +204,18 @@ class ContinuousSession:
         self._play_end = play_end
         self._reporter = reporter
         self._status = status
+        self._warn = warn
         self._state_publisher = state_publisher
         self._start_refusal = start_refusal
+        self._modifier_tracker = modifier_tracker
         self._idle_minutes = idle_minutes
         self._idle_limit_samples = int(idle_minutes * 60.0 * _SAMPLE_RATE)
         self._on_idle_auto_off = on_idle_auto_off
         self._clock = clock if clock is not None else time.monotonic
+        self._sleep = sleep if sleep is not None else time.sleep
         self._mic_stall_seconds = mic_stall_seconds
         self._min_speech_samples = int(min_speech_seconds * _SAMPLE_RATE)
+        self._modifier_wait_seconds = modifier_wait_seconds
 
         self._lock = threading.Lock()
         self._active = False
@@ -205,6 +223,7 @@ class ContinuousSession:
         self._shutting_down = False
         self._idle_samples = 0
         self._idle_off_requested = False
+        self._user_toggle_off = False
         self._detector: SpeechProbabilityModel | None = None
         self._pause = _PauseDetector(pause_seconds=pause_seconds)
         self._listen_stop = threading.Event()
@@ -246,6 +265,7 @@ class ContinuousSession:
             if self._shutting_down or not self._started:
                 return
             if self._active:
+                self._user_toggle_off = True
                 self._listen_stop.set()
                 return
             refusal = self._start_refusal() if self._start_refusal is not None else None
@@ -253,6 +273,7 @@ class ContinuousSession:
                 start_failure = refusal
             else:
                 self._mic_failure = False
+                self._user_toggle_off = False
                 self._listen_stop = threading.Event()
                 self._pause.reset()
                 self._idle_samples = 0
@@ -379,9 +400,7 @@ class ContinuousSession:
             start_error = str(exc)
             self._report(start_error)
         finally:
-            pending = self._pause.flush_pending()
-            if pending is not None and pending.audio.size > 0:
-                self._enqueue_commit(pending)
+            self._enqueue_flushed_pending()
             with self._lock:
                 mic_failure = self._mic_failure
                 shutting_down = self._shutting_down
@@ -389,14 +408,53 @@ class ContinuousSession:
                 self._detector = None
             if stall_thread is not None:
                 stall_thread.join(timeout=1.0)
-            if not shutting_down:
-                self._safe_cue(self._play_end)
-                error: str | None = None
-                if mic_failure:
-                    error = _MIC_STALL_MESSAGE
-                elif start_error is not None:
-                    error = start_error
-                self._publish(ContinuousState(active=False, error=error))
+            self._publish_listen_end(
+                shutting_down=shutting_down,
+                mic_failure=mic_failure,
+                start_error=start_error,
+            )
+
+    def _enqueue_flushed_pending(self) -> None:
+        """Flush Pause detector and enqueue, marking toggle-off modifier wait."""
+        pending = self._pause.flush_pending()
+        if pending is None or pending.audio.size == 0:
+            with self._lock:
+                self._user_toggle_off = False
+            return
+        with self._lock:
+            wait_mods = self._user_toggle_off
+            self._user_toggle_off = False
+        if wait_mods:
+            pending = _PendingCommit(
+                audio=pending.audio,
+                speech_samples=pending.speech_samples,
+                wait_for_modifiers=True,
+            )
+        self._enqueue_commit(pending)
+
+    def _publish_listen_end(
+        self,
+        *,
+        shutting_down: bool,
+        mic_failure: bool,
+        start_error: str | None,
+    ) -> None:
+        """Play end cue and publish inactive state unless shutting down.
+
+        Args:
+            shutting_down: When True, skip end cue/publish (shutdown owns them).
+            mic_failure: Whether the session ended due to mic stall.
+            start_error: Optional start failure message.
+        """
+        if shutting_down:
+            return
+        self._safe_cue(self._play_end)
+        error: str | None = None
+        if mic_failure:
+            error = _MIC_STALL_MESSAGE
+        elif start_error is not None:
+            error = start_error
+        self._publish(ContinuousState(active=False, error=error))
 
     def _mic_stall_watch(self, stop_event: threading.Event) -> None:
         """Turn Continuous off when no audio frames arrive for too long.
@@ -451,27 +509,48 @@ class ContinuousSession:
                     item = self._commit_queue.popleft()
                 if item is None:
                     return
-                if item.speech_samples < self._min_speech_samples:
-                    seconds = item.speech_samples / _SAMPLE_RATE
-                    self._announce(
-                        f"Discarded short sound ({seconds:.3f} s of speech)."
-                    )
-                    continue
-                try:
-                    text = self._transcriber(item.audio)
-                except Exception as exc:
-                    self._report(str(exc))
-                    continue
-                if not text.strip():
-                    self._announce(_NO_SPEECH_MESSAGE)
-                    continue
-                delivery = (
-                    text if text.endswith(_TRAILING_SPACE) else text + _TRAILING_SPACE
-                )
-                try:
-                    self._deliverer(delivery)
-                except Exception as exc:
-                    self._report(str(exc))
+                self._process_commit(item)
+
+    def _process_commit(self, item: _PendingCommit) -> None:
+        """Filter, transcribe, optionally wait for modifiers, then deliver.
+
+        Args:
+            item: Queued Utterance to Commit.
+        """
+        if item.speech_samples < self._min_speech_samples:
+            seconds = item.speech_samples / _SAMPLE_RATE
+            self._announce(f"Discarded short sound ({seconds:.3f} s of speech).")
+            return
+        try:
+            text = self._transcriber(item.audio)
+        except Exception as exc:
+            self._report(str(exc))
+            return
+        if not text.strip():
+            self._announce(_NO_SPEECH_MESSAGE)
+            return
+        delivery = text if text.endswith(_TRAILING_SPACE) else text + _TRAILING_SPACE
+        if item.wait_for_modifiers:
+            self._wait_for_modifiers_or_warn()
+        try:
+            self._deliverer(delivery)
+        except Exception as exc:
+            self._report(str(exc))
+
+    def _wait_for_modifiers_or_warn(self) -> None:
+        """Block up to the wait window for modifiers to clear; warn on timeout."""
+        if self._modifier_tracker is None:
+            return
+        deadline = self._clock() + self._modifier_wait_seconds
+        while self._clock() < deadline:
+            if not self._modifier_tracker.any_held():
+                return
+            self._sleep(0.05)
+        if self._warn is not None:
+            try:
+                self._warn(_MODIFIER_WAIT_WARNING)
+            except Exception as exc:
+                self._report(str(exc))
 
     def _announce(self, message: str) -> None:
         """Emit a dim/info status message without raising.

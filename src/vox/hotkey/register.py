@@ -14,6 +14,7 @@ import numpy as np
 from pynput import keyboard  # type: ignore[import-untyped]
 
 from vox.capture import record_until_stop
+from vox.hotkey.modifiers import ModifierTracker
 
 _MODIFIER_MAP: dict[str, keyboard.Key] = {
     "ctrl": keyboard.Key.ctrl,
@@ -36,6 +37,20 @@ _MODIFIER_TO_LOGICAL: dict[keyboard.Key, keyboard.Key] = {
     keyboard.Key.cmd_r: keyboard.Key.cmd,
 }
 
+_LOGICAL_TO_NAME: dict[keyboard.Key, str] = {
+    keyboard.Key.ctrl: "ctrl",
+    keyboard.Key.shift: "shift",
+    keyboard.Key.alt: "alt",
+    keyboard.Key.cmd: "cmd",
+}
+
+_NAME_TO_LOGICAL: dict[str, keyboard.Key] = {
+    "ctrl": keyboard.Key.ctrl,
+    "shift": keyboard.Key.shift,
+    "alt": keyboard.Key.alt,
+    "cmd": keyboard.Key.cmd,
+}
+
 
 def _normalize_modifier(
     key: keyboard.Key | keyboard.KeyCode | None,
@@ -52,6 +67,18 @@ def _normalize_modifier(
         return None
     out = _MODIFIER_TO_LOGICAL.get(key)
     return out if out is not None else (key if key in _MODIFIER_MAP.values() else None)
+
+
+def _modifier_name(logical: keyboard.Key) -> str | None:
+    """Return the tracker name for a logical modifier key.
+
+    Args:
+        logical: Normalized modifier (e.g. ``Key.ctrl``).
+
+    Returns:
+        Tracker name, or None if not a tracked modifier.
+    """
+    return _LOGICAL_TO_NAME.get(logical)
 
 
 def _parse_hotkey(
@@ -159,6 +186,7 @@ class _PushToTalkSession:
         on_audio: Callable[[np.ndarray], None],
         recording_hooks: _RecordingHooks | None = None,
         continuous: _ContinuousBinding | None = None,
+        modifier_tracker: ModifierTracker | None = None,
     ) -> None:
         """Initialize one push-to-talk session with optional Continuous toggle.
 
@@ -167,6 +195,7 @@ class _PushToTalkSession:
             on_audio: Callback invoked with the completed recording buffer.
             recording_hooks: Optional start/stop callbacks around recording.
             continuous: Optional Continuous dictation toggle binding.
+            modifier_tracker: Shared held-modifier tracker (created if omitted).
         """
         self.modifier_keys, self.trigger_key = _parse_hotkey(
             recording_config.hotkey_str
@@ -184,7 +213,9 @@ class _PushToTalkSession:
         else:
             self.continuous_modifiers = frozenset()
             self.continuous_trigger = ""
-        self.current_modifiers: set[keyboard.Key] = set()
+        self.modifiers = (
+            modifier_tracker if modifier_tracker is not None else ModifierTracker()
+        )
         self.recording_thread: threading.Thread | None = None
         self.stop_event: threading.Event | None = None
         self.result_holder: list[np.ndarray | None] = []
@@ -231,7 +262,13 @@ class _PushToTalkSession:
         Returns:
             Whether the combo's modifiers are satisfied.
         """
-        return required <= self.current_modifiers
+        self.modifiers.reconcile()
+        held = {
+            _NAME_TO_LOGICAL[name]
+            for name in self.modifiers.held()
+            if name in _NAME_TO_LOGICAL
+        }
+        return required <= held
 
     def _winning_binding(
         self,
@@ -292,8 +329,9 @@ class _PushToTalkSession:
         """
         norm = _normalize_modifier(key)
         if norm is not None:
-            with self.lock:
-                self.current_modifiers.add(norm)
+            name = _modifier_name(norm)
+            if name is not None:
+                self.modifiers.press(name)
             return
         with self.lock:
             winner = self._winning_binding(key)
@@ -313,8 +351,9 @@ class _PushToTalkSession:
         """
         norm = _normalize_modifier(key)
         if norm is not None:
-            with self.lock:
-                self.current_modifiers.discard(norm)
+            name = _modifier_name(norm)
+            if name is not None:
+                self.modifiers.release(name)
             return
         with self.lock:
             if self.continuous is not None and _key_matches(
@@ -384,6 +423,7 @@ def run_push_to_talk_loop(  # noqa: PLR0913
     continuous_hotkey: str | None = None,
     on_continuous_toggle: Callable[[], None] | None = None,
     is_continuous_active: Callable[[], bool] | None = None,
+    modifier_tracker: ModifierTracker | None = None,
 ) -> None:
     """Run push-to-talk with an optional Continuous dictation toggle.
 
@@ -406,6 +446,7 @@ def run_push_to_talk_loop(  # noqa: PLR0913
         continuous_hotkey: Optional Continuous toggle combo (default unused).
         on_continuous_toggle: Called when the Continuous toggle fires.
         is_continuous_active: When True, push-to-talk presses are ignored.
+        modifier_tracker: Shared modifier tracker for Continuous wait and matching.
     """
     continuous: _ContinuousBinding | None = None
     if (
@@ -431,5 +472,6 @@ def run_push_to_talk_loop(  # noqa: PLR0913
             on_stop=on_recording_stop,
         ),
         continuous=continuous,
+        modifier_tracker=modifier_tracker,
     )
     session.run(stop_event=stop_event)

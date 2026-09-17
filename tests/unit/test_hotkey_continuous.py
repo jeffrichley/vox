@@ -7,6 +7,7 @@ from unittest import mock
 import pytest
 from pynput import keyboard  # type: ignore[import-untyped]
 
+from vox.hotkey.modifiers import ModifierTracker
 from vox.hotkey.register import (
     _ContinuousBinding,
     _PushToTalkSession,
@@ -21,6 +22,7 @@ def _session(
     continuous: str = "ctrl+alt+space",
     on_toggle: mock.Mock | None = None,
     is_active: mock.Mock | None = None,
+    modifier_tracker: ModifierTracker | None = None,
 ) -> tuple[_PushToTalkSession, mock.Mock, mock.Mock]:
     """Build a dual-binding session with mocked Continuous callbacks."""
     toggle = on_toggle if on_toggle is not None else mock.Mock()
@@ -39,6 +41,7 @@ def _session(
             on_toggle=toggle,
             is_active=active,
         ),
+        modifier_tracker=modifier_tracker or ModifierTracker(reconcile_physical=False),
     )
     return session, toggle, active
 
@@ -171,3 +174,42 @@ class TestComboOverlap:
             # Assert - PTT wins; Continuous does not fire
             toggle.assert_not_called()
             mock_thread.start.assert_called_once()
+
+
+@pytest.mark.unit
+class TestHotkeyStaleModifierReconcile:
+    """Physical reconcile prevents stale modifiers from matching Continuous."""
+
+    def test_plain_space_does_not_toggle_when_stale_modifiers_cleared(self) -> None:
+        """Fake physical-up state clears ctrl+alt so plain Space does not toggle."""
+        # Arrange - fake physical-up state clears ctrl+alt so plain Space does not toggle
+        tracker = ModifierTracker(
+            reconcile_physical=True,
+            physical_key_state=lambda _vk: 0,
+        )
+        tracker.press("ctrl")
+        tracker.press("alt")
+        toggle = mock.Mock()
+        session = _PushToTalkSession(
+            recording_config=_RecordingConfig(
+                hotkey_str="ctrl+space",
+                device_id=None,
+                sample_rate=16_000,
+                channels=1,
+            ),
+            on_audio=mock.Mock(),
+            recording_hooks=_RecordingHooks(),
+            continuous=_ContinuousBinding(
+                hotkey_str="ctrl+alt+space",
+                on_toggle=toggle,
+                is_active=mock.Mock(return_value=False),
+            ),
+            modifier_tracker=tracker,
+        )
+
+        # Act - plain Space with stale event modifiers reconciled away
+        session._on_press(keyboard.Key.space)
+
+        # Assert - Continuous combo no longer matches
+        toggle.assert_not_called()
+        assert tracker.held() == frozenset()
