@@ -20,7 +20,9 @@ _PREROLL_SECONDS = 0.4
 _IDLE_MINUTES = 5.0
 _MIC_STALL_SECONDS = 2.0
 _MIC_STALL_MESSAGE = "Microphone stopped delivering audio."
+_MIN_SPEECH_SECONDS = 0.3
 _TRAILING_SPACE = " "
+_NO_SPEECH_MESSAGE = "No speech detected."
 
 
 @dataclass(frozen=True)
@@ -36,6 +38,14 @@ class ContinuousState:
     error: str | None = None
 
 
+@dataclass(frozen=True)
+class _PendingCommit:
+    """Queued Utterance audio plus detected-speech sample count."""
+
+    audio: np.ndarray
+    speech_samples: int
+
+
 @dataclass
 class _PauseDetector:
     """Hysteresis Pause detector driven by a sample-count clock."""
@@ -48,6 +58,7 @@ class _PauseDetector:
     preroll_seconds: float = _PREROLL_SECONDS
     _in_speech: bool = False
     _silence_samples: int = 0
+    _speech_samples: int = 0
     _utterance: list[np.ndarray] = field(default_factory=list)
     _preroll: deque[np.ndarray] = field(default_factory=deque)
 
@@ -62,54 +73,62 @@ class _PauseDetector:
         """Clear utterance and speech state; keep preroll capacity."""
         self._in_speech = False
         self._silence_samples = 0
+        self._speech_samples = 0
         self._utterance.clear()
         self._preroll.clear()
 
-    def ingest(self, frame: np.ndarray, probability: float) -> np.ndarray | None:
-        """Ingest one frame; return utterance audio when a Pause completes.
+    def ingest(self, frame: np.ndarray, probability: float) -> _PendingCommit | None:
+        """Ingest one frame; return a pending Commit when a Pause completes.
 
         Args:
             frame: Mono float32 samples of length ``frame_samples``.
             probability: Speech probability for this frame.
 
         Returns:
-            Concatenated utterance audio, or None if still open / idle.
+            Pending Commit audio and speech sample count, or None if still open.
         """
         if not self._in_speech:
             self._preroll.append(frame.copy())
             if probability >= self.speech_threshold:
                 self._in_speech = True
                 self._silence_samples = 0
+                self._speech_samples = self.frame_samples
                 self._utterance = [f.copy() for f in self._preroll]
             return None
 
         self._utterance.append(frame.copy())
         if probability >= self.speech_threshold:
+            self._speech_samples += self.frame_samples
             self._silence_samples = 0
             return None
         if probability < self.silence_threshold:
             self._silence_samples += self.frame_samples
             if self._silence_samples >= self._pause_samples:
                 audio = np.concatenate(self._utterance)
+                speech_samples = self._speech_samples
                 self._in_speech = False
                 self._silence_samples = 0
+                self._speech_samples = 0
                 self._utterance = []
                 self._preroll.clear()
-                return audio
+                return _PendingCommit(audio=audio, speech_samples=speech_samples)
         return None
 
-    def flush_pending(self) -> np.ndarray | None:
+    def flush_pending(self) -> _PendingCommit | None:
         """Return pending utterance audio (including partial last frames), if any.
 
         Returns:
-            Pending audio or None when there is no open Utterance.
+            Pending Commit or None when there is no open Utterance.
         """
         if not self._in_speech or not self._utterance:
             self.reset()
             return None
-        audio = np.concatenate(self._utterance)
+        pending = _PendingCommit(
+            audio=np.concatenate(self._utterance),
+            speech_samples=self._speech_samples,
+        )
         self.reset()
-        return audio
+        return pending
 
 
 class ContinuousSession:
@@ -133,6 +152,7 @@ class ContinuousSession:
         play_start: Callable[[], None],
         play_end: Callable[[], None],
         reporter: Callable[[str], None] | None = None,
+        status: Callable[[str], None] | None = None,
         state_publisher: Callable[[ContinuousState], None] | None = None,
         start_refusal: Callable[[], str | None] | None = None,
         pause_seconds: float = _PAUSE_SECONDS,
@@ -140,6 +160,7 @@ class ContinuousSession:
         on_idle_auto_off: Callable[[float], None] | None = None,
         clock: Callable[[], float] | None = None,
         mic_stall_seconds: float = _MIC_STALL_SECONDS,
+        min_speech_seconds: float = _MIN_SPEECH_SECONDS,
     ) -> None:
         """Create an idle session; call ``start`` before toggling.
 
@@ -151,6 +172,7 @@ class ContinuousSession:
             play_start: Start cue (toggle-on).
             play_end: End cue (toggle-off).
             reporter: Optional error/status reporter.
+            status: Optional dim/info notifier (short-sound discard, empty text).
             state_publisher: Optional publisher of active flag plus error.
             start_refusal: Optional gate; return a message to refuse toggle-on.
             pause_seconds: Trailing silence that ends an Utterance (must be > 0).
@@ -158,6 +180,7 @@ class ContinuousSession:
             on_idle_auto_off: Optional callback with configured idle minutes.
             clock: Monotonic clock for mic-stall detection (tests inject a fake).
             mic_stall_seconds: No-audio seconds before mic-failure shutdown.
+            min_speech_seconds: Discard Utterances with less detected speech.
         """
         self._stream_starter = stream_starter
         self._speech_detector_factory = speech_detector_factory
@@ -166,6 +189,7 @@ class ContinuousSession:
         self._play_start = play_start
         self._play_end = play_end
         self._reporter = reporter
+        self._status = status
         self._state_publisher = state_publisher
         self._start_refusal = start_refusal
         self._idle_minutes = idle_minutes
@@ -173,6 +197,7 @@ class ContinuousSession:
         self._on_idle_auto_off = on_idle_auto_off
         self._clock = clock if clock is not None else time.monotonic
         self._mic_stall_seconds = mic_stall_seconds
+        self._min_speech_samples = int(min_speech_seconds * _SAMPLE_RATE)
 
         self._lock = threading.Lock()
         self._active = False
@@ -184,7 +209,7 @@ class ContinuousSession:
         self._pause = _PauseDetector(pause_seconds=pause_seconds)
         self._listen_stop = threading.Event()
         self._listen_thread: threading.Thread | None = None
-        self._commit_queue: deque[np.ndarray | None] = deque()
+        self._commit_queue: deque[_PendingCommit | None] = deque()
         self._commit_event = threading.Event()
         self._commit_thread: threading.Thread | None = None
         self._commits_done = threading.Condition()
@@ -267,9 +292,9 @@ class ContinuousSession:
                 flat = padded
         probability = detector.probability(flat)
         self._note_idle_sample(probability)
-        audio = self._pause.ingest(flat, probability)
-        if audio is not None:
-            self._enqueue_commit(audio)
+        pending = self._pause.ingest(flat, probability)
+        if pending is not None:
+            self._enqueue_commit(pending)
 
     def _note_idle_sample(self, probability: float) -> None:
         """Advance or reset the idle sample clock; auto-off at most once.
@@ -355,7 +380,7 @@ class ContinuousSession:
             self._report(start_error)
         finally:
             pending = self._pause.flush_pending()
-            if pending is not None and pending.size > 0:
+            if pending is not None and pending.audio.size > 0:
                 self._enqueue_commit(pending)
             with self._lock:
                 mic_failure = self._mic_failure
@@ -398,14 +423,14 @@ class ContinuousSession:
             self._report(_MIC_STALL_MESSAGE)
             return
 
-    def _enqueue_commit(self, audio: np.ndarray) -> None:
+    def _enqueue_commit(self, pending: _PendingCommit) -> None:
         """Enqueue utterance audio for the FIFO Commit worker.
 
         Args:
-            audio: Concatenated Utterance samples to transcribe and Inject.
+            pending: Utterance samples and detected-speech sample count.
         """
         with self._commits_done:
-            self._commit_queue.append(audio)
+            self._commit_queue.append(pending)
             self._commit_event.set()
 
     def _enqueue_sentinel(self) -> None:
@@ -426,12 +451,19 @@ class ContinuousSession:
                     item = self._commit_queue.popleft()
                 if item is None:
                     return
+                if item.speech_samples < self._min_speech_samples:
+                    seconds = item.speech_samples / _SAMPLE_RATE
+                    self._announce(
+                        f"Discarded short sound ({seconds:.3f} s of speech)."
+                    )
+                    continue
                 try:
-                    text = self._transcriber(item)
+                    text = self._transcriber(item.audio)
                 except Exception as exc:
                     self._report(str(exc))
                     continue
                 if not text.strip():
+                    self._announce(_NO_SPEECH_MESSAGE)
                     continue
                 delivery = (
                     text if text.endswith(_TRAILING_SPACE) else text + _TRAILING_SPACE
@@ -440,6 +472,19 @@ class ContinuousSession:
                     self._deliverer(delivery)
                 except Exception as exc:
                     self._report(str(exc))
+
+    def _announce(self, message: str) -> None:
+        """Emit a dim/info status message without raising.
+
+        Args:
+            message: User-facing status detail.
+        """
+        if self._status is None:
+            return
+        try:
+            self._status(message)
+        except Exception as exc:
+            self._report(str(exc))
 
     def _report(self, message: str) -> None:
         """Report a failure without raising.

@@ -151,7 +151,7 @@ class TestContinuousSessionIdleAutoOff:
         cues: list[str] = []
         idle_frames = _PREROLL_FRAMES + 5
         idle_minutes = idle_frames * FRAME_SAMPLES / (_SAMPLE_RATE * 60.0)
-        probs = [0.1] * _PREROLL_FRAMES + [0.9] * 5 + [0.1] * (idle_frames + 5)
+        probs = [0.1] * _PREROLL_FRAMES + [0.9] * 10 + [0.1] * (idle_frames + 5)
         session = _make_session(
             probs=probs,
             deliverer=delivered.append,
@@ -165,7 +165,7 @@ class TestContinuousSessionIdleAutoOff:
         time.sleep(0.05)
         for _ in range(_PREROLL_FRAMES):
             session.ingest_frame(_silence_frame())
-        for _ in range(5):
+        for _ in range(10):
             session.ingest_frame(_tone_frame())
 
         # Act - silence hits idle mid-Utterance before a full Pause

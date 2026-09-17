@@ -37,7 +37,12 @@ from vox.inject import (
     set_clipboard,
     type_into_focused,
 )
-from vox.transcribe import TranscriptionError, load_model, transcribe
+from vox.transcribe import (
+    TranscriptionError,
+    load_model,
+    transcribe,
+    transcribe_speech_only,
+)
 
 if TYPE_CHECKING:
     from faster_whisper import WhisperModel  # type: ignore[import-untyped]
@@ -470,7 +475,7 @@ def _build_continuous_session(  # noqa: PLR0913
         )
 
     def transcriber(audio: np.ndarray) -> str:
-        """Transcribe one Committed Utterance.
+        """Transcribe one Committed Utterance with the speech-only filter.
 
         Args:
             audio: Utterance samples as a float32 array.
@@ -478,7 +483,7 @@ def _build_continuous_session(  # noqa: PLR0913
         Returns:
             Transcribed text for Injection.
         """
-        return transcribe(audio, model=model)
+        return transcribe_speech_only(audio, model=model)
 
     def reporter(message: str) -> None:
         """Surface Continuous runtime failures without failing silently.
@@ -487,6 +492,14 @@ def _build_continuous_session(  # noqa: PLR0913
             message: Error detail to print.
         """
         console.print(f"[red]Continuous dictation error:[/red] {message}")
+
+    def status(message: str) -> None:
+        """Print dim Continuous status (short-sound discard, empty speech).
+
+        Args:
+            message: Status detail to print.
+        """
+        console.print(f"[dim]{message}[/dim]")
 
     def on_idle_auto_off(minutes: float) -> None:
         """Print a dim message when Continuous auto-off fires.
@@ -531,6 +544,7 @@ def _build_continuous_session(  # noqa: PLR0913
         play_start=on_recording_start,
         play_end=on_recording_stop,
         reporter=reporter,
+        status=status,
         state_publisher=state_publisher,
         start_refusal=start_refusal,
         pause_seconds=pause_seconds,
