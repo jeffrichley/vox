@@ -641,7 +641,7 @@ class TestHandleRun:
                     "compute_type": "float32",
                     "compute_device": "cpu",
                     "injection_mode": "clipboard",
-                    "continuous_hotkey": "ctrl+alt+space",
+                    "continuous_hotkey": "ctrl+alt+d",
                     "continuous_pause_seconds": 1.0,
                 },
                 {
@@ -651,7 +651,7 @@ class TestHandleRun:
                     "compute_type": "float32",
                     "compute_device": "cpu",
                     "injection_mode": "clipboard",
-                    "continuous_hotkey": "ctrl+alt+space",
+                    "continuous_hotkey": "ctrl+alt+d",
                     "continuous_pause_seconds": 1.0,
                 },
             ]
