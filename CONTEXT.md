@@ -11,7 +11,7 @@ The listening mode where speech is captured only while the user holds the hotkey
 _Avoid_: PTT mode, hold mode
 
 **Continuous dictation**:
-The hands-free listening mode, toggled on and off, where the user speaks freely and each utterance is committed without holding a key.
+The listening mode toggled on and off with its own hotkey, where the user speaks freely and each utterance is committed on Pause without holding a key.
 _Avoid_: Continual dictation, hands-free mode, always-on, open mic
 
 ### Speech and text

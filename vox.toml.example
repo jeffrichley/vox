@@ -30,11 +30,12 @@ compute_device = "cpu"
 cue_volume = 0.5
 
 # Optional: how to inject transcribed text.
-# - "clipboard": only set clipboard (default).
+# - "clipboard": only set clipboard (default). Continuous dictation refuses to
+#   start in this mode (each Commit would overwrite the previous one).
 # - "clipboard_and_paste": set clipboard and paste into focused window (needs
 #   accessibility permission). After paste, Vox restores the previous clipboard
 #   text ~150 ms later when safe. Restore is text-only (non-text contents are
-#   not preserved).
+#   not preserved). A very slow paste consumer could paste after the restore.
 # - "type": type directly into the focused window without modifying the clipboard
 #   (needs accessibility permission).
 injection_mode = "clipboard"
