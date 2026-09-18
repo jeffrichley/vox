@@ -24,6 +24,13 @@ from PIL import Image
 from rich.console import Console
 
 from vox.commands import handle_run
+from vox.continuous.session import ContinuousState
+from vox.continuous.status_text import (
+    get_published_state,
+    subscribe_continuous_state,
+    tray_notification,
+    tray_tooltip,
+)
 from vox.gui.settings_launcher import launch_settings_from_runtime
 
 
@@ -142,13 +149,45 @@ def run_tray(console: Console) -> BaseException | None:
         pystray.MenuItem("Settings...", on_settings, default=True),
         pystray.MenuItem("Quit", on_quit),
     )
-    icon = pystray.Icon("vox", image, "Vox — push-to-talk", menu=menu)
-    _run_icon_until_stopped(
-        icon=icon,
-        worker_done=worker_done,
-        worker_error=worker_error,
-        stop_event=stop_event,
+    icon = pystray.Icon(
+        "vox",
+        image,
+        tray_tooltip(get_published_state()),
+        menu=menu,
     )
+
+    def on_continuous_state(state: ContinuousState) -> None:
+        """Update tooltip; notify once on Continuous error. Keep worker alive.
+
+        Args:
+            state: Latest published Continuous dictation state.
+        """
+        try:
+            icon.title = tray_tooltip(state)
+            note = tray_notification(state)
+            if note is None:
+                return
+            if not getattr(icon, "HAS_NOTIFICATION", False):
+                console.print(
+                    "[yellow]Tray update warning:[/yellow] "
+                    "notifications are not supported on this platform."
+                )
+                return
+            title, message = note
+            icon.notify(message, title)
+        except Exception as e:
+            console.print(f"[yellow]Tray update warning:[/yellow] {e}")
+
+    unsubscribe = subscribe_continuous_state(on_continuous_state)
+    try:
+        _run_icon_until_stopped(
+            icon=icon,
+            worker_done=worker_done,
+            worker_error=worker_error,
+            stop_event=stop_event,
+        )
+    finally:
+        unsubscribe()
 
     thread.join(timeout=2.0)
     if worker_error:
