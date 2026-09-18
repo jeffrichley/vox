@@ -81,10 +81,11 @@ cp vox.toml.example ~/.vox/vox.toml
 
 ## Settings Screen
 
-- **Autosave rules:** dropdowns and toggles save immediately after a valid selection; text-like fields such as `hotkey` save on Enter or focus loss; `cue_volume` saves after a short debounce so dragging the slider does not write on every movement.
+- **Autosave rules:** dropdowns and toggles save immediately after a valid selection; text-like fields such as `hotkey`, `continuous_hotkey`, `continuous_pause_seconds`, and `continuous_idle_minutes` save on Enter or focus loss; `cue_volume` saves after a short debounce so dragging the slider does not write on every movement.
+- **Recording section:** Push-to-talk `hotkey`, Continuous dictation `continuous_hotkey` (same key-capture behaviour), Pause length, idle auto-off minutes, and input device. Continuous hotkey collisions with Push-to-talk are rejected with a field-specific status. Number fields are validated by the config layer (`> 0`, finite); invalid input is not saved.
 - **Runtime access:** `vox settings` opens the window directly; if Vox is already running, the Stop window and tray both expose a `Settings` / `Settings...` action that launches the same screen as a separate process.
 - **Override warnings:** when a `VOX_*` environment variable currently supersedes a file-backed value, the settings window shows that warning so the on-disk value is not mistaken for the effective runtime value.
-- **Restart/apply guidance:** changing `hotkey`, device selection, transcription settings, injection mode, or tray usage updates the config immediately, but an already-running Vox session applies those changes after restart.
+- **Restart/apply guidance:** changing `hotkey`, `continuous_hotkey`, `continuous_pause_seconds`, `continuous_idle_minutes`, device selection, transcription settings, injection mode, or tray usage updates the config immediately, but an already-running Vox session applies those changes after restart. Restore Defaults covers the Continuous fields along with the other supported keys.
 
 ## Transcription model (faster-whisper)
 
