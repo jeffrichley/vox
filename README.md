@@ -9,7 +9,7 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org)
 [![Renovate enabled](https://img.shields.io/badge/renovate-enabled-brightgreen.svg)](https://renovatebot.com)
 
-Vox is the voice input layer for the system. It captures speech via push-to-talk, transcribes it locally with **faster-whisper**, and injects the text into the clipboard (and optionally into the focused window). No cloud calls; no silent failures.
+Vox is the voice input layer for the system. It captures speech via **Push-to-talk** or **Continuous dictation**, transcribes it locally with **faster-whisper**, and injects the text into the clipboard (and optionally into the focused window). No cloud calls; no silent failures.
 
 ## Install
 
@@ -73,7 +73,10 @@ cp vox.toml.example ~/.vox/vox.toml
 - **Focus:** Text goes to the window focused when the Commit happens—wait for the text before switching windows if you care where it lands. Vox does not track windows.
 - **Push-to-talk:** Ignored while Continuous dictation is on; works unchanged while it is off.
 - **Hotkey pass-through:** The Continuous toggle is not suppressed, so the focused app still receives the keypress.
+- **Modifier wait:** After you toggle Continuous off, the final Commit waits up to 2 s for modifier keys (Ctrl/Alt/Shift/Cmd) to release so Injection does not fire app shortcuts; Pause Commits never wait. On Windows, held-modifier state is reconciled against the OS so swallowed key-ups (e.g. after Ctrl+Alt+Del or Win+L) do not leave a stale toggle. macOS/Linux trust key events only.
+- **Status feedback:** The Stop window label and tray tooltip show Continuous on, off, or error. In tray mode, Continuous failures raise a Windows notification; normal on/off toggles do not.
 - **Live rebind:** Changing `continuous_hotkey` (or the Push-to-talk `hotkey`) while Vox is running rebinds without a full restart.
+- **Limits:** Clipboard restore is text-only. A very slow paste consumer (some Electron or RDP apps) could paste after the ~150 ms restore. Quitting Vox does not wait for in-flight Commits.
 - **`vox settings`** — Open the standalone settings window. It exposes `Recording`, `Transcription`, `Output`, and `Runtime` sections, autosaves each valid completed change, warns when env vars currently override file-backed values, and shows restart guidance for changes that do not affect an already-running session until restart.
 - **Cue volume:** Set `cue_volume` in config (or `VOX_CUE_VOLUME`) to any value from `0.0` to `1.0`. Default is `0.5`. In the settings screen, changing the cue-volume slider autosaves after a short debounce and then plays a cue preview automatically at the new level.
 - **`vox devices`** — List audio input devices (ID, name, host API). Use this to choose `device_id` in config.
@@ -111,7 +114,10 @@ A human can verify the shipped feature set by:
 6. **Round-trip:** Close and reopen `vox settings` and confirm the saved values reload from disk.
 7. **Runtime access:** Run `uv run vox`, then launch settings from the Stop window or tray affordance and confirm the settings window opens without shutting down the active session.
 8. **Voice workflow:** Press and hold the configured hotkey, speak, release, and confirm transcription/injection still works as configured.
-9. **Errors:** If mic, model, or launch prerequisites are missing, Vox surfaces a clear error message instead of failing silently.
+9. **Continuous dictation:** Tap the Continuous hotkey, hear the start cue, dictate two sentences with a Pause into Notepad (two Commits with trailing spaces), switch windows and dictate again, then toggle off mid-sentence and see the last text Injected.
+10. **Continuous feedback:** Confirm the Stop window label (or tray tooltip) reflects on/off/error; in tray mode, clipboard-only refusal and a mic failure each raise a notification while normal toggles do not.
+11. **Clipboard restore:** With `clipboard_and_paste`, copy text, dictate, and confirm the previous clipboard text returns after paste.
+12. **Errors:** If mic, model, or launch prerequisites are missing, Vox surfaces a clear error message instead of failing silently.
 
 ## Development
 

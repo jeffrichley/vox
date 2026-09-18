@@ -1,6 +1,6 @@
 # Vox
 
-Local push-to-talk voice input: capture speech, transcribe with faster-whisper, inject text. Runtime code lives in `src/vox`; tests in `tests/unit` and `tests/integration`. Domain terms are defined in `CONTEXT.md`; use them.
+Local Push-to-talk and Continuous dictation voice input: capture speech, transcribe with faster-whisper, inject text. Runtime code lives in `src/vox`; tests in `tests/unit` and `tests/integration`. Domain terms are defined in `CONTEXT.md`; use them.
 
 ## Workflow
 
