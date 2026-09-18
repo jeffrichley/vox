@@ -13,6 +13,9 @@ from typing import Literal, cast
 from rich.console import Console
 
 from vox.config import (
+    DEFAULT_CONTINUOUS_HOTKEY,
+    DEFAULT_CONTINUOUS_IDLE_MINUTES,
+    DEFAULT_CONTINUOUS_PAUSE_SECONDS,
     ConfigError,
     get_env_override_fields,
     load_persisted_config,
@@ -44,6 +47,9 @@ SETTINGS_SECTIONS: tuple[str, ...] = (
 
 DEFAULT_SETTINGS: PersistedConfig = {
     "hotkey": "ctrl+shift+v",
+    "continuous_hotkey": DEFAULT_CONTINUOUS_HOTKEY,
+    "continuous_pause_seconds": DEFAULT_CONTINUOUS_PAUSE_SECONDS,
+    "continuous_idle_minutes": DEFAULT_CONTINUOUS_IDLE_MINUTES,
     "device_id": None,
     "model_size": "base",
     "compute_type": "float32",
@@ -83,12 +89,22 @@ INJECTION_MODE_OPTIONS: tuple[str, ...] = (
 RESTART_REQUIRED_FIELDS: frozenset[str] = frozenset(
     {
         "hotkey",
+        "continuous_hotkey",
+        "continuous_pause_seconds",
+        "continuous_idle_minutes",
         "device_id",
         "model_size",
         "compute_type",
         "compute_device",
         "injection_mode",
         "use_tray",
+    }
+)
+
+_NUMBER_TEXT_FIELDS: frozenset[str] = frozenset(
+    {
+        "continuous_pause_seconds",
+        "continuous_idle_minutes",
     }
 )
 
@@ -281,7 +297,17 @@ class SettingsController:
         Returns:
             True when the update is saved; False when validation fails.
         """
-        return self._persist_updates({field_name: value}, field_name)
+        parsed: SettingValue = value
+        if field_name in _NUMBER_TEXT_FIELDS:
+            try:
+                parsed = float(value.strip())
+            except ValueError:
+                self.status = StatusState(
+                    STATUS_KIND_ERROR,
+                    f"{field_name}: must be a finite number greater than 0",
+                )
+                return False
+        return self._persist_updates({field_name: parsed}, field_name)
 
     def commit_choice(self, field_name: str, value: SettingValue) -> bool:
         """Persist a combobox or checkbox change immediately.
@@ -430,6 +456,130 @@ class SettingsController:
         return True
 
 
+class HotkeyCaptureField:
+    """Per-field hotkey capture state bound to one settings Entry."""
+
+    def __init__(
+        self,
+        *,
+        field_name: str,
+        variable: tk.StringVar,
+        on_commit: Callable[[str, str], None],
+    ) -> None:
+        """Store field identity, display variable, and commit callback.
+
+        Args:
+            field_name: Config key persisted when capture completes.
+            variable: Tk string variable bound to the Entry.
+            on_commit: Called with ``(field_name, normalized_hotkey)`` on commit.
+        """
+        self.field_name = field_name
+        self._variable = variable
+        self._on_commit = on_commit
+        self._modifier_order: list[str] = []
+        self._active_modifiers: set[str] = set()
+        self._active_trigger: str | None = None
+        self._captured_value: str | None = None
+
+    def bind(self, entry: ttk.Entry) -> None:
+        """Attach capture handlers to ``entry``.
+
+        Args:
+            entry: Hotkey Entry widget to bind.
+        """
+        entry.bind("<FocusIn>", self.on_focus_in)
+        entry.bind("<KeyPress>", self.on_key_press)
+        entry.bind("<KeyRelease>", self.on_key_release)
+        entry.bind("<Return>", self.on_commit)
+        entry.bind("<FocusOut>", self.on_commit)
+
+    def set_display(self, value: str) -> None:
+        """Set the Entry display from a normalized hotkey string.
+
+        Args:
+            value: Normalized persisted hotkey text.
+        """
+        self._variable.set(_format_hotkey_display(value))
+
+    def on_focus_in(self, _event: tk.Event[tk.Entry]) -> None:
+        """Reset capture state when the field gains focus."""
+        self._captured_value = None
+        self._active_trigger = None
+        self._active_modifiers.clear()
+        self._modifier_order.clear()
+
+    def on_key_press(self, event: tk.Event[tk.Entry]) -> str:
+        """Capture and display hotkey parts from physical key presses.
+
+        Args:
+            event: Tk key-press event from the hotkey entry widget.
+
+        Returns:
+            Tk break marker so the entry does not insert raw key text.
+        """
+        token = _event_keysym_to_hotkey_token(event.keysym)
+        if token is None:
+            return "break"
+        if token in _HOTKEY_MODIFIERS:
+            self._active_modifiers.add(token)
+            self._modifier_order = _ordered_modifiers(self._active_modifiers)
+        else:
+            self._active_trigger = token
+        self._update_display()
+        return "break"
+
+    def on_key_release(self, event: tk.Event[tk.Entry]) -> str:
+        """Update hotkey preview as held keys are released.
+
+        Args:
+            event: Tk key-release event from the hotkey entry widget.
+
+        Returns:
+            Tk break marker so release events do not alter entry text directly.
+        """
+        token = _event_keysym_to_hotkey_token(event.keysym)
+        if token is None:
+            return "break"
+        if token in _HOTKEY_MODIFIERS:
+            self._active_modifiers.discard(token)
+            self._modifier_order = _ordered_modifiers(self._active_modifiers)
+        elif self._active_trigger == token:
+            self._active_trigger = None
+        self._update_display()
+        return "break"
+
+    def on_commit(self, _event: tk.Event[tk.Entry] | None = None) -> None:
+        """Persist the hotkey when editing is complete."""
+        candidate = self._captured_value or self._variable.get()
+        normalized = _normalize_hotkey_capture_value(candidate)
+        if normalized:
+            self.set_display(normalized)
+        self._on_commit(self.field_name, normalized)
+        self._captured_value = None
+        self._active_trigger = None
+        self._active_modifiers.clear()
+        self._modifier_order.clear()
+
+    def _update_display(self) -> None:
+        """Refresh entry text from active held keys and captured combo."""
+        active_modifiers = [
+            modifier
+            for modifier in self._modifier_order
+            if modifier in self._active_modifiers
+        ]
+        active = _build_hotkey_value(active_modifiers, self._active_trigger)
+        if self._active_trigger is not None and active:
+            self._captured_value = active
+        preview = _choose_hotkey_preview(
+            active=active,
+            captured=self._captured_value,
+            has_trigger=(self._active_trigger is not None),
+        )
+        if preview is None:
+            return
+        self._variable.set(_format_hotkey_display(preview))
+
+
 class SettingsWindow:
     """Tk view for the standalone settings editor."""
 
@@ -446,16 +596,31 @@ class SettingsWindow:
         self._device_options = controller.load_device_options()
 
         root.title("Vox Settings")
-        root.geometry("620x540")
-        root.minsize(580, 500)
+        root.geometry("620x700")
+        root.minsize(580, 640)
         root.protocol("WM_DELETE_WINDOW", self._on_window_close)
 
         self._status_var = tk.StringVar(value=controller.status.text)
         self._hotkey_var = tk.StringVar(value=str(controller.values["hotkey"]))
-        self._hotkey_modifier_order: list[str] = []
-        self._hotkey_active_modifiers: set[str] = set()
-        self._hotkey_active_trigger: str | None = None
-        self._captured_hotkey_value: str | None = None
+        self._continuous_hotkey_var = tk.StringVar(
+            value=str(controller.values["continuous_hotkey"])
+        )
+        self._continuous_pause_var = tk.StringVar(
+            value=str(controller.values["continuous_pause_seconds"])
+        )
+        self._continuous_idle_var = tk.StringVar(
+            value=str(controller.values["continuous_idle_minutes"])
+        )
+        self._hotkey_field = HotkeyCaptureField(
+            field_name="hotkey",
+            variable=self._hotkey_var,
+            on_commit=self._commit_hotkey_field,
+        )
+        self._continuous_hotkey_field = HotkeyCaptureField(
+            field_name="continuous_hotkey",
+            variable=self._continuous_hotkey_var,
+            on_commit=self._commit_hotkey_field,
+        )
         self._device_var = tk.StringVar(
             value=self._device_label(controller.values["device_id"])
         )
@@ -515,14 +680,40 @@ class SettingsWindow:
         ttk.Label(section, text="Hotkey").grid(row=0, column=0, sticky=tk.W)
         hotkey_entry = ttk.Entry(section, textvariable=self._hotkey_var, width=28)
         hotkey_entry.grid(row=0, column=1, sticky=tk.W, padx=(8, 8))
-        hotkey_entry.bind("<FocusIn>", self._on_hotkey_focus_in)
-        hotkey_entry.bind("<KeyPress>", self._on_hotkey_key_press)
-        hotkey_entry.bind("<KeyRelease>", self._on_hotkey_key_release)
-        hotkey_entry.bind("<Return>", self._on_hotkey_commit)
-        hotkey_entry.bind("<FocusOut>", self._on_hotkey_commit)
+        self._hotkey_field.bind(hotkey_entry)
         self._add_override_note(section, "hotkey", row=1)
 
-        ttk.Label(section, text="Input device").grid(row=2, column=0, sticky=tk.W)
+        ttk.Label(section, text="Continuous hotkey").grid(row=2, column=0, sticky=tk.W)
+        continuous_hotkey_entry = ttk.Entry(
+            section,
+            textvariable=self._continuous_hotkey_var,
+            width=28,
+        )
+        continuous_hotkey_entry.grid(row=2, column=1, sticky=tk.W, padx=(8, 8))
+        self._continuous_hotkey_field.bind(continuous_hotkey_entry)
+        self._add_override_note(section, "continuous_hotkey", row=3)
+
+        ttk.Label(section, text="Pause length").grid(row=4, column=0, sticky=tk.W)
+        pause_entry = ttk.Entry(
+            section,
+            textvariable=self._continuous_pause_var,
+            width=28,
+        )
+        pause_entry.grid(row=4, column=1, sticky=tk.W, padx=(8, 8))
+        self._bind_number_field(pause_entry, "continuous_pause_seconds")
+        self._add_override_note(section, "continuous_pause_seconds", row=5)
+
+        ttk.Label(section, text="Idle minutes").grid(row=6, column=0, sticky=tk.W)
+        idle_entry = ttk.Entry(
+            section,
+            textvariable=self._continuous_idle_var,
+            width=28,
+        )
+        idle_entry.grid(row=6, column=1, sticky=tk.W, padx=(8, 8))
+        self._bind_number_field(idle_entry, "continuous_idle_minutes")
+        self._add_override_note(section, "continuous_idle_minutes", row=7)
+
+        ttk.Label(section, text="Input device").grid(row=8, column=0, sticky=tk.W)
         device_combo = ttk.Combobox(
             section,
             textvariable=self._device_var,
@@ -530,14 +721,14 @@ class SettingsWindow:
             state="readonly",
             width=40,
         )
-        device_combo.grid(row=2, column=1, sticky=tk.W, padx=(8, 8))
+        device_combo.grid(row=8, column=1, sticky=tk.W, padx=(8, 8))
         device_combo.bind("<<ComboboxSelected>>", self._on_device_selected)
         ttk.Button(section, text="Test Mic", command=self._run_test_mic).grid(
-            row=2,
+            row=8,
             column=2,
             sticky=tk.W,
         )
-        self._add_override_note(section, "device_id", row=3)
+        self._add_override_note(section, "device_id", row=9)
 
     def _build_transcription_section(self, parent: ttk.Frame) -> None:
         """Build the Transcription section controls.
@@ -747,93 +938,56 @@ class SettingsWindow:
         self._controller.commit_choice(field_name, value)
         self._sync_status()
 
-    def _on_hotkey_commit(self, _event: tk.Event[tk.Entry] | None) -> None:
-        """Persist the hotkey when editing is complete."""
-        candidate = self._captured_hotkey_value or self._hotkey_var.get()
-        normalized = _normalize_hotkey_capture_value(candidate)
-        if normalized:
-            self._hotkey_var.set(_format_hotkey_display(normalized))
-        self._controller.commit_text("hotkey", normalized)
+    def _number_field_vars(self) -> dict[str, tk.StringVar]:
+        """Return Continuous number fields mapped to their Entry variables.
+
+        Returns:
+            Mapping of config key to the bound Tk string variable.
+        """
+        return {
+            "continuous_pause_seconds": self._continuous_pause_var,
+            "continuous_idle_minutes": self._continuous_idle_var,
+        }
+
+    def _bind_number_field(self, entry: ttk.Entry, field_name: str) -> None:
+        """Save a Continuous number field on Enter or focus loss.
+
+        Args:
+            entry: Number Entry widget.
+            field_name: Config key for the Entry.
+        """
+        entry.bind("<Return>", lambda _event: self._commit_number_field(field_name))
+        entry.bind("<FocusOut>", lambda _event: self._commit_number_field(field_name))
+
+    def _commit_hotkey_field(self, field_name: str, normalized: str) -> None:
+        """Persist a completed hotkey capture for one field.
+
+        Args:
+            field_name: Config key being updated (``hotkey`` or Continuous).
+            normalized: Parser-compatible hotkey string.
+        """
+        self._controller.commit_text(field_name, normalized)
         self._sync_status()
-        self._captured_hotkey_value = None
-        self._hotkey_active_trigger = None
-        self._hotkey_active_modifiers.clear()
-        self._hotkey_modifier_order.clear()
+
+    def _commit_number_field(self, field_name: str) -> None:
+        """Persist a Continuous number field on Enter or focus loss.
+
+        Args:
+            field_name: ``continuous_pause_seconds`` or ``continuous_idle_minutes``.
+        """
+        variable = self._number_field_vars()[field_name]
+        succeeded = self._controller.commit_text(field_name, variable.get())
+        if succeeded:
+            variable.set(str(self._controller.values[field_name]))
+        self._sync_status()
 
     def _on_window_close(self) -> None:
-        """Persist pending hotkey capture before closing the window."""
-        self._on_hotkey_commit(None)
+        """Persist pending hotkey captures before closing the window."""
+        self._hotkey_field.on_commit(None)
+        self._continuous_hotkey_field.on_commit(None)
+        self._commit_number_field("continuous_pause_seconds")
+        self._commit_number_field("continuous_idle_minutes")
         self._root.destroy()
-
-    def _on_hotkey_focus_in(self, _event: tk.Event[tk.Entry]) -> None:
-        """Reset capture state when the hotkey field gains focus."""
-        self._captured_hotkey_value = None
-        self._hotkey_active_trigger = None
-        self._hotkey_active_modifiers.clear()
-        self._hotkey_modifier_order.clear()
-
-    def _on_hotkey_key_press(self, event: tk.Event[tk.Entry]) -> str:
-        """Capture and display hotkey parts from physical key presses.
-
-        Args:
-            event: Tk key-press event from the hotkey entry widget.
-
-        Returns:
-            Tk break marker so the entry does not insert raw key text.
-        """
-        token = _event_keysym_to_hotkey_token(event.keysym)
-        if token is None:
-            return "break"
-        if token in _HOTKEY_MODIFIERS:
-            self._hotkey_active_modifiers.add(token)
-            self._hotkey_modifier_order = _ordered_modifiers(
-                self._hotkey_active_modifiers
-            )
-        else:
-            self._hotkey_active_trigger = token
-        self._update_hotkey_capture_display()
-        return "break"
-
-    def _on_hotkey_key_release(self, event: tk.Event[tk.Entry]) -> str:
-        """Update hotkey preview as held keys are released.
-
-        Args:
-            event: Tk key-release event from the hotkey entry widget.
-
-        Returns:
-            Tk break marker so release events do not alter entry text directly.
-        """
-        token = _event_keysym_to_hotkey_token(event.keysym)
-        if token is None:
-            return "break"
-        if token in _HOTKEY_MODIFIERS:
-            self._hotkey_active_modifiers.discard(token)
-            self._hotkey_modifier_order = _ordered_modifiers(
-                self._hotkey_active_modifiers
-            )
-        elif self._hotkey_active_trigger == token:
-            self._hotkey_active_trigger = None
-        self._update_hotkey_capture_display()
-        return "break"
-
-    def _update_hotkey_capture_display(self) -> None:
-        """Refresh entry text from active held keys and captured combo."""
-        active_modifiers = [
-            modifier
-            for modifier in self._hotkey_modifier_order
-            if modifier in self._hotkey_active_modifiers
-        ]
-        active = _build_hotkey_value(active_modifiers, self._hotkey_active_trigger)
-        if self._hotkey_active_trigger is not None and active:
-            self._captured_hotkey_value = active
-        preview = _choose_hotkey_preview(
-            active=active,
-            captured=self._captured_hotkey_value,
-            has_trigger=(self._hotkey_active_trigger is not None),
-        )
-        if preview is None:
-            return
-        self._hotkey_var.set(_format_hotkey_display(preview))
 
     def _on_device_selected(self, _event: tk.Event[ttk.Combobox]) -> None:
         """Persist the selected input device immediately."""
@@ -862,7 +1016,16 @@ class SettingsWindow:
     def _on_restore_defaults(self) -> None:
         """Replace config with defaults after explicit confirmation."""
         self._controller.restore_defaults()
-        self._hotkey_var.set(str(self._controller.values["hotkey"]))
+        self._hotkey_field.set_display(str(self._controller.values["hotkey"]))
+        self._continuous_hotkey_field.set_display(
+            str(self._controller.values["continuous_hotkey"])
+        )
+        self._continuous_pause_var.set(
+            str(self._controller.values["continuous_pause_seconds"])
+        )
+        self._continuous_idle_var.set(
+            str(self._controller.values["continuous_idle_minutes"])
+        )
         self._device_var.set(self._device_label(self._controller.values["device_id"]))
         self._model_size_var.set(str(self._controller.values["model_size"]))
         self._compute_type_var.set(str(self._controller.values["compute_type"]))
