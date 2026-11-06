@@ -8,6 +8,7 @@ Local Push-to-talk and Continuous dictation voice input: capture speech, transcr
 - Before commit or PR, run the full gate: `just quality && just test`. CI runs `just quality-check` + `just test-cov` and requires ≥80% diff coverage on changed lines.
 - Treat test and runtime warnings as defects. Fix them, or document why a residual warning is accepted.
 - PR descriptions follow `.github/pull_request_template.md`: state what is complete, what is temporary, and what is deferred.
+- Renovate merges its own grouped non-major pull request once CI is green. It runs centrally from `jeffrichley/runners`, whose `RENOVATE_TOKEN` it uses; this repo has no Renovate workflow or token of its own.
 - Prefer `uv run python` over bare `python` in docs and scripts.
 
 ## Code standards
