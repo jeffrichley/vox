@@ -36,9 +36,22 @@ jobs:
       - name: Install just
         uses: extractions/setup-just@v4
 
-      - name: Install Ubuntu system deps (PortAudio, xvfb for headless pynput)
+      - name: Install Ubuntu system deps (PortAudio, PulseAudio, xvfb for headless pynput)
         if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update && sudo apt-get install -y libportaudio2 xvfb
+        run: sudo apt-get update && sudo apt-get install -y libportaudio2 pulseaudio xvfb
+
+      # Ubuntu's PortAudio (19.7.0+git2026, from ubuntu-26.04) has a PulseAudio host
+      # API, and Pa_Initialize fails outright when no PulseAudio server answers, so
+      # `import sounddevice` raises. Run a server with a null sink: its monitor is the
+      # default input, so the capture tests run against real PortAudio, headless.
+      - name: Start PulseAudio with a null sink (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=ci_null
+          pactl set-default-sink ci_null
+          pactl set-default-source ci_null.monitor
+          pactl info
 
       - name: Install dependencies
         run: uv sync --frozen --all-groups
