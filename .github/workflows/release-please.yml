@@ -34,4 +34,4 @@ jobs:
             echo "No release-please PR found; skipping auto-merge setup."
             exit 0
           fi
-          gh pr merge "$PR_NUMBER" --auto --merge
+          gh pr merge "$PR_NUMBER" --auto --squash
